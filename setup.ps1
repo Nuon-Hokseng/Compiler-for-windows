@@ -251,64 +251,95 @@ if ($chromiumDirs) {
 Write-Step "Creating launcher and Desktop shortcut..."
 
 $launchVbs = @"
-Dim sh, result
+Dim sh, fso, logFile, result
 Set sh = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
 
 Dim APP_DIR, BACKEND, FRONTEND
 APP_DIR  = "C:\IGAutomation"
 BACKEND  = APP_DIR & "\backend"
 FRONTEND = APP_DIR & "\frontend"
+logFile  = APP_DIR & "\launcher-log.txt"
+
+Sub Log(msg)
+    On Error Resume Next
+    Dim ts, line, tf
+    ts = Time
+    line = "[" & ts & "] " & msg
+    Set tf = fso.OpenTextFile(logFile, 8, True)
+    tf.WriteLine line
+    tf.Close
+End Sub
+
+Log "================ Launcher start ================"
+Log "BACKEND=" & BACKEND
+Log "FRONTEND=" & FRONTEND
 
 ' If both ports already running just open browser instantly
 Dim backendUp, frontendUp
 backendUp  = sh.Run("cmd /c netstat -an | findstr "":8000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
 frontendUp = sh.Run("cmd /c netstat -an | findstr "":3000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
+Log "Initial port check: backendUp=" & backendUp & ", frontendUp=" & frontendUp
 
 If backendUp = 0 And frontendUp = 0 Then
+    Log "Both already running; opening browser."
     sh.Run "http://localhost:3000"
     WScript.Quit
 End If
 
 ' Kill any partial instances
+Log "Killing stale listeners on 3000/8000 (if any)..."
 sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":3000 "" ^| findstr ""LISTENING""') do taskkill /F /PID %a 2>nul", 0, True
 sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":8000 "" ^| findstr ""LISTENING""') do taskkill /F /PID %a 2>nul", 0, True
-WScript.Sleep 1000
+WScript.Sleep 1200
 
 ' Start backend silently
-sh.Run "cmd /c cd /d """ & BACKEND & """ && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe", 0, False
+Log "Starting backend.exe..."
+sh.Run "cmd /c cd /d """ & BACKEND & """ && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> """ & logFile & """ 2>&1", 0, False
 
 ' Start frontend silently — try full npm path first
-Dim npmCmd, npmFull
+Dim npmFull
 npmFull = sh.ExpandEnvironmentStrings("%PROGRAMFILES%\nodejs\npm.cmd")
 If sh.Run("cmd /c if exist """ & npmFull & """ exit 0", 0, True) = 0 Then
-    sh.Run "cmd /c cd /d """ & FRONTEND & """ && """ & npmFull & """ start", 0, False
+    Log "Starting frontend with npmFull run start: " & npmFull
+    sh.Run "cmd /c cd /d """ & FRONTEND & """ && """ & npmFull & """ run start >> """ & logFile & """ 2>&1", 0, False
 Else
-    sh.Run "cmd /c cd /d """ & FRONTEND & """ && npm start", 0, False
+    Log "Starting frontend with npm run start (PATH)"
+    sh.Run "cmd /c cd /d """ & FRONTEND & """ && npm run start >> """ & logFile & """ 2>&1", 0, False
 End If
 
 ' Wait for backend (max 2 min)
-Dim attempts
+Dim attempts, backendNow, frontendNow
 attempts = 0
 Do
     WScript.Sleep 2000
-    result = sh.Run("cmd /c netstat -an | findstr "":8000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
+    backendNow = sh.Run("cmd /c netstat -an | findstr "":8000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
     attempts = attempts + 1
+    If attempts Mod 10 = 0 Then Log "Waiting backend... attempt=" & attempts & ", code=" & backendNow
     If attempts > 60 Then Exit Do
-Loop While result <> 0
+Loop While backendNow <> 0
 
 ' Wait for frontend (max 2 min)
 attempts = 0
 Do
     WScript.Sleep 2000
-    result = sh.Run("cmd /c netstat -an | findstr "":3000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
+    frontendNow = sh.Run("cmd /c netstat -an | findstr "":3000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
     attempts = attempts + 1
+    If attempts Mod 10 = 0 Then Log "Waiting frontend... attempt=" & attempts & ", code=" & frontendNow
     If attempts > 60 Then Exit Do
-Loop While result <> 0
+Loop While frontendNow <> 0
 
-If backendUp = 0 And frontendUp = 0 Then
+' Final verification (fresh check)
+backendNow  = sh.Run("cmd /c netstat -an | findstr "":8000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
+frontendNow = sh.Run("cmd /c netstat -an | findstr "":3000 "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
+Log "Final port check: backendNow=" & backendNow & ", frontendNow=" & frontendNow
+
+If backendNow = 0 And frontendNow = 0 Then
+    Log "Startup successful. Opening browser."
     sh.Run "http://localhost:3000"
 Else
-    sh.Run "cmd /c echo IG Automation failed to start. Check C:\IGAutomation\setup-log.txt && pause", 1, False
+    Log "Startup failed. Showing console message."
+    sh.Run "cmd /c echo IG Automation failed to start. Check C:\IGAutomation\launcher-log.txt and C:\IGAutomation\setup-log.txt && pause", 1, False
 End If
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, [System.Text.UTF8Encoding]::new($false))
@@ -365,3 +396,4 @@ Write-Log "  ALL DONE!" "Magenta"
 Write-Log "  Double-click 'IG Automation' on your Desktop" "Magenta"
 Write-Log "================================================"
 Write-Log "Log: $LOG"
+Write-Log "Launcher log: $APP_DIR\launcher-log.txt"
