@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 python-multipart
-playwright==1.44.0
+playwright
 langchain-core
 langchain
 langchain-ollama
