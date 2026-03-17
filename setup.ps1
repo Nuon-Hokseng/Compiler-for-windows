@@ -260,23 +260,24 @@ BACKEND  = APP_DIR & "\backend"
 FRONTEND = APP_DIR & "\frontend"
 logFile  = APP_DIR & "\launcher-log.txt"
 
-' ── Logging helper ──────────────────────────────────
-Dim fso, logStream
+' ── Logging helper (append-mode, no Flush) ──────────
+Dim fso
 Set fso = CreateObject("Scripting.FileSystemObject")
-Set logStream = fso.OpenTextFile(logFile, 2, True)  ' 2=ForWriting, True=create
+
+' Wipe log on fresh launch
+fso.OpenTextFile(logFile, 2, True).Close
 
 Sub Log(msg)
-    Dim ts
+    Dim ts, f
     ts = Now()
-    logStream.WriteLine "[" & Hour(ts) & ":" & Right("0" & Minute(ts), 2) & ":" & Right("0" & Second(ts), 2) & "] " & msg
-    logStream.Flush
+    Set f = fso.OpenTextFile(logFile, 8, True)  ' 8=ForAppending
+    f.WriteLine "[" & Right("0" & Hour(ts), 2) & ":" & Right("0" & Minute(ts), 2) & ":" & Right("0" & Second(ts), 2) & "] " & msg
+    f.Close
 End Sub
 
 ' ── Port check helper ───────────────────────────────
 Function PortListening(port)
-    Dim r
-    r = sh.Run("cmd /c netstat -an | findstr "":" & port & " "" | findstr ""LISTENING"" >nul 2>&1", 0, True)
-    PortListening = (r = 0)
+    PortListening = (sh.Run("cmd /c netstat -an | findstr "":" & port & " "" | findstr ""LISTENING"" >nul 2>&1", 0, True) = 0)
 End Function
 
 Log "================ Launcher start ================"
@@ -287,7 +288,6 @@ Log "FRONTEND=" & FRONTEND
 If PortListening(8000) And PortListening(3000) Then
     Log "Both services already running - opening browser"
     sh.Run "http://localhost:3000"
-    logStream.Close
     WScript.Quit
 End If
 
@@ -297,11 +297,10 @@ sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":3000 "" ^|
 sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":8000 "" ^| findstr ""LISTENING""') do taskkill /F /PID %a >nul 2>&1", 0, True
 WScript.Sleep 1000
 
-' ── Verify .env.enc exists before launching ─────────
+' ── Verify .env.enc exists ──────────────────────────
 If Not fso.FileExists(FRONTEND & "\.env.enc") Then
-    Log "[ERROR] .env.enc not found at: " & FRONTEND & "\.env.enc"
-    MsgBox "IG Automation setup is incomplete." & vbCrLf & ".env.enc is missing from:" & vbCrLf & FRONTEND & vbCrLf & vbCrLf & "Please reinstall.", 16, "IG Automation - Error"
-    logStream.Close
+    Log "[ERROR] .env.enc not found"
+    MsgBox ".env.enc is missing from:" & vbCrLf & FRONTEND & vbCrLf & "Please reinstall.", 16, "IG Automation - Error"
     WScript.Quit
 End If
 Log ".env.enc found OK"
@@ -310,55 +309,41 @@ Log ".env.enc found OK"
 Dim npmCmd
 npmCmd = ""
 
-' Try explicit path first
 Dim npmFull
 npmFull = sh.ExpandEnvironmentStrings("%PROGRAMFILES%\nodejs\npm.cmd")
-If fso.FileExists(npmFull) Then
-    npmCmd = npmFull
-    Log "npm found at: " & npmCmd
-End If
+If fso.FileExists(npmFull) Then npmCmd = npmFull
 
-' Try x86 path
 If npmCmd = "" Then
     Dim npmx86
     npmx86 = sh.ExpandEnvironmentStrings("%ProgramFiles(x86)%\nodejs\npm.cmd")
-    If fso.FileExists(npmx86) Then
-        npmCmd = npmx86
-        Log "npm found at: " & npmCmd
-    End If
+    If fso.FileExists(npmx86) Then npmCmd = npmx86
 End If
 
-' Try LOCALAPPDATA
 If npmCmd = "" Then
     Dim npmLocal
     npmLocal = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\nodejs\npm.cmd")
-    If fso.FileExists(npmLocal) Then
-        npmCmd = npmLocal
-        Log "npm found at: " & npmCmd
-    End If
+    If fso.FileExists(npmLocal) Then npmCmd = npmLocal
 End If
 
-' Fall back to PATH
 If npmCmd = "" Then
     If sh.Run("cmd /c npm --version >nul 2>&1", 0, True) = 0 Then
         npmCmd = "npm"
-        Log "npm found on PATH"
     End If
 End If
 
 If npmCmd = "" Then
     Log "[ERROR] npm not found anywhere"
     MsgBox "npm (Node.js) was not found." & vbCrLf & "Please install Node.js from https://nodejs.org then re-run setup.", 16, "IG Automation - Error"
-    logStream.Close
     WScript.Quit
 End If
+Log "npm found: " & npmCmd
 
 ' ── Start backend ────────────────────────────────────
 Log "Starting backend.exe..."
 sh.Run "cmd /c cd /d """ & BACKEND & """ && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> """ & logFile & """ 2>&1", 0, False
 
 ' ── Start frontend ───────────────────────────────────
-Log "Starting frontend with: " & npmCmd
+Log "Starting frontend..."
 sh.Run "cmd /c cd /d """ & FRONTEND & """ && """ & npmCmd & """ run start >> """ & logFile & """ 2>&1", 0, False
 
 ' ── Wait for backend (max 60s) ───────────────────────
@@ -370,26 +355,27 @@ For i = 1 To 30
         Log "Backend ready after " & (i * 2) & "s"
         Exit For
     End If
-    If i = 30 Then Log "[WARN] Backend not ready after 60s"
 Next
+If Not PortListening(8000) Then Log "[WARN] Backend not ready after 60s"
 
 ' ── Wait for frontend (max 120s) ─────────────────────
 Log "Waiting for frontend on port 3000..."
+Dim frontendReady
+frontendReady = False
 For i = 1 To 60
     WScript.Sleep 2000
     If PortListening(3000) Then
         Log "Frontend ready after " & (i * 2) & "s - opening browser"
         sh.Run "http://localhost:3000"
-        logStream.Close
-        WScript.Quit
-    End If
-    If i = 60 Then
-        Log "[ERROR] Frontend did not start within 120s"
-        MsgBox "The frontend did not start within 2 minutes." & vbCrLf & vbCrLf & "Check the log for errors:" & vbCrLf & logFile, 16, "IG Automation - Error"
+        frontendReady = True
+        Exit For
     End If
 Next
 
-logStream.Close
+If Not frontendReady Then
+    Log "[ERROR] Frontend did not start within 120s - check log above for npm/next errors"
+    MsgBox "The frontend did not start within 2 minutes." & vbCrLf & vbCrLf & "Check the log for errors:" & vbCrLf & logFile, 16, "IG Automation - Error"
+End If
 "@
 
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, [System.Text.UTF8Encoding]::new($false))
