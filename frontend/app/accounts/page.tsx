@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { api, type CookieSnapshot } from "@/lib/api";
@@ -12,7 +12,28 @@ import { AccountsTable } from "../../components/dashboard/accounts/AccountsTable
 import { AddAccountDialog } from "../../components/dashboard/accounts/AddAccountDialog";
 import { DeleteAccountDialog } from "../../components/dashboard/accounts/DeleteAccountDialog";
 
+// 1. Top-level page component wrapped in Suspense
 export default function AccountsPage() {
+  return (
+    <Suspense fallback={<AccountsPageFallback />}>
+      <AccountsPageContent />
+    </Suspense>
+  );
+}
+
+function AccountsPageFallback() {
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Accounts</h1>
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+// 2. Actual content component that uses useSearchParams
+function AccountsPageContent() {
   const { user, isLoading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const [addOpen, setAddOpen] = useState(false);
@@ -62,7 +83,6 @@ export default function AccountsPage() {
     mutateCookies();
   }
 
-  // Delete handler
   function handleDeleteClick(cookieId: number, label: string) {
     setDeleteTarget({ id: cookieId, label });
     setDeleteOpen(true);
