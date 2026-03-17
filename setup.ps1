@@ -354,7 +354,7 @@ foreach ($dp in ($desktopPaths | Select-Object -Unique)) {
             Write-Log "[OK] Shortcut created: $dp\IG Automation.lnk" "Green"
             $shortcutCreated = $true
         } catch {
-            Write-Log "   Shortcut failed at $dp: $($_.Exception.Message)" "Yellow"
+            Write-Log "   Shortcut failed at $($dp): $($_.Exception.Message)" "Yellow"
         }
     }
 }
