@@ -251,6 +251,8 @@ if ($chromiumDirs) {
 Write-Step "Creating launcher and Desktop shortcut..."
 
 $launchVbs = @"
+On Error Resume Next
+
 Dim sh
 Set sh = CreateObject("WScript.Shell")
 
@@ -260,19 +262,20 @@ BACKEND  = APP_DIR & "\backend"
 FRONTEND = APP_DIR & "\frontend"
 logFile  = APP_DIR & "\launcher-log.txt"
 
-' ── Logging helper (append-mode, no Flush) ──────────
 Dim fso
 Set fso = CreateObject("Scripting.FileSystemObject")
 
-' Wipe log on fresh launch
-fso.OpenTextFile(logFile, 2, True).Close
+' Wipe old log safely
+sh.Run "cmd /c del /f /q """ & logFile & """ >nul 2>&1", 0, True
 
 Sub Log(msg)
+    On Error Resume Next
     Dim ts, f
     ts = Now()
-    Set f = fso.OpenTextFile(logFile, 8, True)  ' 8=ForAppending
+    Set f = fso.OpenTextFile(logFile, 8, True)
     f.WriteLine "[" & Right("0" & Hour(ts), 2) & ":" & Right("0" & Minute(ts), 2) & ":" & Right("0" & Second(ts), 2) & "] " & msg
     f.Close
+    On Error GoTo 0
 End Sub
 
 ' ── Port check helper ───────────────────────────────
@@ -299,8 +302,8 @@ WScript.Sleep 1000
 
 ' ── Verify .env.enc exists ──────────────────────────
 If Not fso.FileExists(FRONTEND & "\.env.enc") Then
-    Log "[ERROR] .env.enc not found"
-    MsgBox ".env.enc is missing from:" & vbCrLf & FRONTEND & vbCrLf & "Please reinstall.", 16, "IG Automation - Error"
+    Log "[ERROR] .env.enc not found at: " & FRONTEND & "\.env.enc"
+    MsgBox ".env.enc is missing from:" & vbCrLf & FRONTEND & vbCrLf & vbCrLf & "Please reinstall.", 16, "IG Automation - Error"
     WScript.Quit
 End If
 Log ".env.enc found OK"
@@ -311,18 +314,24 @@ npmCmd = ""
 
 Dim npmFull
 npmFull = sh.ExpandEnvironmentStrings("%PROGRAMFILES%\nodejs\npm.cmd")
-If fso.FileExists(npmFull) Then npmCmd = npmFull
+If fso.FileExists(npmFull) Then
+    npmCmd = npmFull
+End If
 
 If npmCmd = "" Then
     Dim npmx86
     npmx86 = sh.ExpandEnvironmentStrings("%ProgramFiles(x86)%\nodejs\npm.cmd")
-    If fso.FileExists(npmx86) Then npmCmd = npmx86
+    If fso.FileExists(npmx86) Then
+        npmCmd = npmx86
+    End If
 End If
 
 If npmCmd = "" Then
     Dim npmLocal
     npmLocal = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\nodejs\npm.cmd")
-    If fso.FileExists(npmLocal) Then npmCmd = npmLocal
+    If fso.FileExists(npmLocal) Then
+        npmCmd = npmLocal
+    End If
 End If
 
 If npmCmd = "" Then
@@ -341,10 +350,12 @@ Log "npm found: " & npmCmd
 ' ── Start backend ────────────────────────────────────
 Log "Starting backend.exe..."
 sh.Run "cmd /c cd /d """ & BACKEND & """ && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> """ & logFile & """ 2>&1", 0, False
+Log "backend.exe launched"
 
 ' ── Start frontend ───────────────────────────────────
 Log "Starting frontend..."
 sh.Run "cmd /c cd /d """ & FRONTEND & """ && """ & npmCmd & """ run start >> """ & logFile & """ 2>&1", 0, False
+Log "frontend launch command sent"
 
 ' ── Wait for backend (max 60s) ───────────────────────
 Log "Waiting for backend on port 8000..."
@@ -355,8 +366,10 @@ For i = 1 To 30
         Log "Backend ready after " & (i * 2) & "s"
         Exit For
     End If
+    If i = 30 Then
+        Log "[WARN] Backend not ready after 60s - continuing anyway"
+    End If
 Next
-If Not PortListening(8000) Then Log "[WARN] Backend not ready after 60s"
 
 ' ── Wait for frontend (max 120s) ─────────────────────
 Log "Waiting for frontend on port 3000..."
@@ -370,14 +383,12 @@ For i = 1 To 60
         frontendReady = True
         Exit For
     End If
+    If i = 60 Then
+        Log "[ERROR] Frontend did not start within 120s - check log for npm/next errors"
+        MsgBox "The frontend did not start within 2 minutes." & vbCrLf & vbCrLf & "Check the log for errors:" & vbCrLf & logFile, 16, "IG Automation - Error"
+    End If
 Next
-
-If Not frontendReady Then
-    Log "[ERROR] Frontend did not start within 120s - check log above for npm/next errors"
-    MsgBox "The frontend did not start within 2 minutes." & vbCrLf & vbCrLf & "Check the log for errors:" & vbCrLf & logFile, 16, "IG Automation - Error"
-End If
 "@
-
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, [System.Text.UTF8Encoding]::new($false))
 Write-Log "   start.vbs written."
 
