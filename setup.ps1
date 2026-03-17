@@ -40,12 +40,11 @@ Write-Log "User    = $env:USERNAME"
 Write-Log "OS      = $([System.Environment]::OSVersion.VersionString)"
 Write-Log "Log     = $LOG"
 
-# Set execution policy machine-wide silently
 try {
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force -ErrorAction SilentlyContinue
 } catch {}
 
-# VERIFY INSTALL
+# ── VERIFY INSTALL ───────────────────────────────────
 if (-not (Test-Path $APP_DIR)) {
     Write-Log "[ERROR] $APP_DIR not found. Please reinstall." "Red"
     Read-Host "Press Enter to exit"; exit 1
@@ -61,13 +60,12 @@ if (-not (Test-Path "$FRONTEND\.next")) {
 Write-Log "[OK] Install verified." "Green"
 
 # ── STEP 1: NODE.JS ──────────────────────────────────
-Write-Step "[Step 1/2] Checking Node.js..."
+Write-Step "[Step 1/3] Checking Node.js..."
 Refresh-Path
 
 $hasNode = $null
 try { $hasNode = & node --version 2>&1 } catch {}
 
-# Check common paths
 if (-not $hasNode -or $hasNode -notmatch "v\d") {
     foreach ($nodePath in @(
         "$env:PROGRAMFILES\nodejs\node.exe",
@@ -107,7 +105,6 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
     if (-not $downloaded) {
         Write-Log "[ERROR] Could not download Node.js." "Red"
-        Write-Log "   Install from https://nodejs.org then re-run: $APP_DIR\run-setup.bat" "Red"
         Read-Host "Press Enter to exit"; exit 1
     }
 
@@ -134,12 +131,10 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
 if (-not $hasNode -or $hasNode -notmatch "v\d") {
     Write-Log "[ERROR] Node.js still not found after install." "Red"
-    Write-Log "   Restart your computer and re-run: $APP_DIR\run-setup.bat" "Red"
     Read-Host "Press Enter to exit"; exit 1
 }
 Write-Log "[OK] Node: $hasNode" "Green"
 
-# Ensure npm on PATH
 $npmPaths = @(
     (Join-Path $env:PROGRAMFILES "nodejs"),
     (Join-Path $env:APPDATA "npm"),
@@ -153,12 +148,11 @@ foreach ($p in $npmPaths) {
 try { Write-Log "[OK] npm: $(& npm --version 2>&1)" "Green" } catch {}
 
 # ── STEP 2: CONFIGURE FRONTEND ───────────────────────
-Write-Step "[Step 2/2] Configuring frontend..."
+Write-Step "[Step 2/3] Configuring frontend..."
 Set-Location $FRONTEND
 
 $utf8NoBOM = [System.Text.UTF8Encoding]::new($false)
 
-# Write load-env.js for runtime env decryption
 $loadEnvContent = @'
 const fs     = require('fs');
 const path   = require('path');
@@ -199,7 +193,6 @@ foreach ($cfgFile in @("$FRONTEND\next.config.js", "$FRONTEND\next.config.ts")) 
     }
 }
 
-# node_modules is pre-bundled — no npm install needed
 if (Test-Path "$FRONTEND\node_modules") {
     Write-Log "[OK] node_modules pre-bundled - no install needed." "Green"
 } else {
@@ -208,7 +201,6 @@ if (Test-Path "$FRONTEND\node_modules") {
     Write-Log "[OK] npm install complete." "Green"
 }
 
-# Set PLAYWRIGHT_BROWSERS_PATH permanently
 $PW_BROWSERS = "C:\IGAutomation\browsers"
 [System.Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", $PW_BROWSERS, "Machine")
 $env:PLAYWRIGHT_BROWSERS_PATH = $PW_BROWSERS
@@ -247,150 +239,165 @@ if ($chromiumDirs) {
     if (-not $chromiumOk) { Write-Log "[WARN] Chromium not installed - will attempt on first use." "Yellow" }
 }
 
-# ── CREATE SILENT VBS LAUNCHER ───────────────────────
-Write-Step "Creating launcher and Desktop shortcut..."
+# ── STEP 3: CREATE LAUNCHERS ─────────────────────────
+Write-Step "[Step 3/3] Creating launchers, scheduled task and Desktop shortcut..."
 
+# ── Find npm path now (during setup) and bake it into the bat ──
+$npmBaked = "npm"
+foreach ($candidate in @(
+    "$env:PROGRAMFILES\nodejs\npm.cmd",
+    "$env:ProgramFiles(x86)\nodejs\npm.cmd",
+    "$env:LOCALAPPDATA\Programs\nodejs\npm.cmd",
+    "$env:APPDATA\npm\npm.cmd"
+)) {
+    if (Test-Path $candidate) { $npmBaked = $candidate; break }
+}
+Write-Log "   npm baked path: $npmBaked" "Green"
+
+# ── Write start-services.bat (used by both scheduled task and shortcut) ──
+$startBat = @"
+@echo off
+set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
+set LOG=C:\IGAutomation\launcher-log.txt
+
+echo [%TIME%] ===== start-services.bat ===== >> "%LOG%"
+
+:: ── Find npm ──────────────────────────────────────
+set NPM_CMD=
+if exist "$npmBaked" (
+    set "NPM_CMD=$npmBaked"
+    goto npm_ok
+)
+if exist "%ProgramFiles%\nodejs\npm.cmd" (
+    set "NPM_CMD=%ProgramFiles%\nodejs\npm.cmd"
+    goto npm_ok
+)
+if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" (
+    set "NPM_CMD=%ProgramFiles(x86)%\nodejs\npm.cmd"
+    goto npm_ok
+)
+if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" (
+    set "NPM_CMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd"
+    goto npm_ok
+)
+if exist "%APPDATA%\npm\npm.cmd" (
+    set "NPM_CMD=%APPDATA%\npm\npm.cmd"
+    goto npm_ok
+)
+where npm >nul 2>&1
+if %errorlevel%==0 (
+    set NPM_CMD=npm
+    goto npm_ok
+)
+for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Node.js" /v InstallPath 2^>nul') do (
+    if exist "%%b\npm.cmd" ( set "NPM_CMD=%%b\npm.cmd" & goto npm_ok )
+)
+echo [%TIME%] [ERROR] npm not found >> "%LOG%"
+exit /b 1
+
+:npm_ok
+echo [%TIME%] npm=%NPM_CMD% >> "%LOG%"
+
+:: ── Kill stale on 8000 / 3000 ─────────────────────
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+:: ── Start backend ──────────────────────────────────
+echo [%TIME%] Starting backend >> "%LOG%"
+start "" /B cmd /c "cd /d C:\IGAutomation\backend && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> ""%LOG%"" 2>&1"
+
+:: ── Start frontend ─────────────────────────────────
+echo [%TIME%] Starting frontend >> "%LOG%"
+start "" /B cmd /c "cd /d C:\IGAutomation\frontend && ""%NPM_CMD%"" run start >> ""%LOG%"" 2>&1"
+
+echo [%TIME%] Both services launched >> "%LOG%"
+"@
+[System.IO.File]::WriteAllText("$APP_DIR\start-services.bat", $startBat, $utf8NoBOM)
+Write-Log "   start-services.bat written." "Green"
+
+# ── Write open-app.bat (used by shortcut — waits for port then opens browser) ──
+$openBat = @"
+@echo off
+set LOG=C:\IGAutomation\launcher-log.txt
+echo [%TIME%] ===== open-app.bat ===== >> "%LOG%"
+
+:: Check if both already up
+netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
+if %errorlevel%==0 (
+    netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
+    if %errorlevel%==0 (
+        echo [%TIME%] Both ports up - opening browser directly >> "%LOG%"
+        start "" "http://localhost:3000"
+        exit /b 0
+    )
+)
+
+:: Not ready yet - start services then wait
+echo [%TIME%] Services not running - starting them >> "%LOG%"
+call "C:\IGAutomation\start-services.bat"
+
+:: Wait for port 3000 using TCP test via PowerShell (more reliable than netstat)
+echo [%TIME%] Waiting for port 3000 >> "%LOG%"
+:waitloop
+powershell -NoProfile -Command "try { `$t=New-Object Net.Sockets.TcpClient; `$t.Connect('127.0.0.1',3000); `$t.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if %errorlevel%==1 (
+    timeout /t 2 /nobreak >nul
+    goto waitloop
+)
+
+echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
+start "" "http://localhost:3000"
+"@
+[System.IO.File]::WriteAllText("$APP_DIR\open-app.bat", $openBat, $utf8NoBOM)
+Write-Log "   open-app.bat written." "Green"
+
+# ── VBS just silently runs open-app.bat ──────────────
 $launchVbs = @"
-On Error Resume Next
-
 Dim sh
 Set sh = CreateObject("WScript.Shell")
-
-Dim APP_DIR, BACKEND, FRONTEND, logFile
-APP_DIR  = "C:\IGAutomation"
-BACKEND  = APP_DIR & "\backend"
-FRONTEND = APP_DIR & "\frontend"
-logFile  = APP_DIR & "\launcher-log.txt"
-
-Dim fso
-Set fso = CreateObject("Scripting.FileSystemObject")
-
-' Wipe old log safely
-sh.Run "cmd /c del /f /q """ & logFile & """ >nul 2>&1", 0, True
-
-Sub Log(msg)
-    On Error Resume Next
-    Dim ts, f
-    ts = Now()
-    Set f = fso.OpenTextFile(logFile, 8, True)
-    f.WriteLine "[" & Right("0" & Hour(ts), 2) & ":" & Right("0" & Minute(ts), 2) & ":" & Right("0" & Second(ts), 2) & "] " & msg
-    f.Close
-    On Error GoTo 0
-End Sub
-
-' ── Port check helper ───────────────────────────────
-Function PortListening(port)
-    PortListening = (sh.Run("cmd /c netstat -an | findstr "":" & port & " "" | findstr ""LISTENING"" >nul 2>&1", 0, True) = 0)
-End Function
-
-Log "================ Launcher start ================"
-Log "BACKEND="  & BACKEND
-Log "FRONTEND=" & FRONTEND
-
-' ── If both already up just open browser ────────────
-If PortListening(8000) And PortListening(3000) Then
-    Log "Both services already running - opening browser"
-    sh.Run "http://localhost:3000"
-    WScript.Quit
-End If
-
-' ── Kill stale listeners ────────────────────────────
-Log "Killing stale listeners on 3000/8000..."
-sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":3000 "" ^| findstr ""LISTENING""') do taskkill /F /PID %a >nul 2>&1", 0, True
-sh.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr "":8000 "" ^| findstr ""LISTENING""') do taskkill /F /PID %a >nul 2>&1", 0, True
-WScript.Sleep 1000
-
-' ── Verify .env.enc exists ──────────────────────────
-If Not fso.FileExists(FRONTEND & "\.env.enc") Then
-    Log "[ERROR] .env.enc not found at: " & FRONTEND & "\.env.enc"
-    MsgBox ".env.enc is missing from:" & vbCrLf & FRONTEND & vbCrLf & vbCrLf & "Please reinstall.", 16, "IG Automation - Error"
-    WScript.Quit
-End If
-Log ".env.enc found OK"
-
-' ── Find npm ────────────────────────────────────────
-Dim npmCmd
-npmCmd = ""
-
-Dim npmFull
-npmFull = sh.ExpandEnvironmentStrings("%PROGRAMFILES%\nodejs\npm.cmd")
-If fso.FileExists(npmFull) Then
-    npmCmd = npmFull
-End If
-
-If npmCmd = "" Then
-    Dim npmx86
-    npmx86 = sh.ExpandEnvironmentStrings("%ProgramFiles(x86)%\nodejs\npm.cmd")
-    If fso.FileExists(npmx86) Then
-        npmCmd = npmx86
-    End If
-End If
-
-If npmCmd = "" Then
-    Dim npmLocal
-    npmLocal = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\nodejs\npm.cmd")
-    If fso.FileExists(npmLocal) Then
-        npmCmd = npmLocal
-    End If
-End If
-
-If npmCmd = "" Then
-    If sh.Run("cmd /c npm --version >nul 2>&1", 0, True) = 0 Then
-        npmCmd = "npm"
-    End If
-End If
-
-If npmCmd = "" Then
-    Log "[ERROR] npm not found anywhere"
-    MsgBox "npm (Node.js) was not found." & vbCrLf & "Please install Node.js from https://nodejs.org then re-run setup.", 16, "IG Automation - Error"
-    WScript.Quit
-End If
-Log "npm found: " & npmCmd
-
-' ── Start backend ────────────────────────────────────
-Log "Starting backend.exe..."
-sh.Run "cmd /c cd /d """ & BACKEND & """ && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> """ & logFile & """ 2>&1", 0, False
-Log "backend.exe launched"
-
-' ── Start frontend ───────────────────────────────────
-Log "Starting frontend..."
-sh.Run "cmd /c cd /d """ & FRONTEND & """ && """ & npmCmd & """ run start >> """ & logFile & """ 2>&1", 0, False
-Log "frontend launch command sent"
-
-' ── Wait for backend (max 60s) ───────────────────────
-Log "Waiting for backend on port 8000..."
-Dim i
-For i = 1 To 30
-    WScript.Sleep 2000
-    If PortListening(8000) Then
-        Log "Backend ready after " & (i * 2) & "s"
-        Exit For
-    End If
-    If i = 30 Then
-        Log "[WARN] Backend not ready after 60s - continuing anyway"
-    End If
-Next
-
-' ── Wait for frontend (max 120s) ─────────────────────
-Log "Waiting for frontend on port 3000..."
-Dim frontendReady
-frontendReady = False
-For i = 1 To 60
-    WScript.Sleep 2000
-    If PortListening(3000) Then
-        Log "Frontend ready after " & (i * 2) & "s - opening browser"
-        sh.Run "http://localhost:3000"
-        frontendReady = True
-        Exit For
-    End If
-    If i = 60 Then
-        Log "[ERROR] Frontend did not start within 120s - check log for npm/next errors"
-        MsgBox "The frontend did not start within 2 minutes." & vbCrLf & vbCrLf & "Check the log for errors:" & vbCrLf & logFile, 16, "IG Automation - Error"
-    End If
-Next
+sh.Run "cmd /c C:\IGAutomation\open-app.bat", 0, False
 "@
-[System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, [System.Text.UTF8Encoding]::new($false))
-Write-Log "   start.vbs written."
+[System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, $utf8NoBOM)
+Write-Log "   start.vbs written." "Green"
+
+# ── Register scheduled task to start services at logon ──
+$currentUser = "$env:USERDOMAIN\$env:USERNAME"
+Write-Log "   Registering scheduled task for user: $currentUser" "Yellow"
+
+# Remove old task if exists
+Unregister-ScheduledTask -TaskName "IGAutomation-Startup" -Confirm:$false -ErrorAction SilentlyContinue
+
+$action  = New-ScheduledTaskAction `
+    -Execute "cmd.exe" `
+    -Argument "/c `"C:\IGAutomation\start-services.bat`"" `
+    -WorkingDirectory $APP_DIR
+
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+
+$settings = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+    -MultipleInstances IgnoreNew `
+    -StartWhenAvailable
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId $currentUser `
+    -LogonType Interactive `
+    -RunLevel Highest
+
+try {
+    Register-ScheduledTask `
+        -TaskName "IGAutomation-Startup" `
+        -Action $action `
+        -Trigger $trigger `
+        -Settings $settings `
+        -Principal $principal `
+        -Force | Out-Null
+    Write-Log "[OK] Scheduled task registered - services will auto-start at logon." "Green"
+} catch {
+    Write-Log "[WARN] Could not register scheduled task: $($_.Exception.Message)" "Yellow"
+    Write-Log "       Shortcut will still start services on demand." "Yellow"
+}
 
 # ── DESKTOP SHORTCUT ─────────────────────────────────
 $loggedInUser = $null
@@ -440,6 +447,7 @@ foreach ($dp in ($desktopPaths | Select-Object -Unique)) {
 Write-Log ""
 Write-Log "================================================" "Magenta"
 Write-Log "  ALL DONE!" "Magenta"
+Write-Log "  Services will auto-start on next logon." "Magenta"
 Write-Log "  Double-click 'IG Automation' on your Desktop" "Magenta"
 Write-Log "================================================"
 Write-Log "Log: $LOG"
