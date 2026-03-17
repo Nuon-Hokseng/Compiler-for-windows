@@ -39,9 +39,9 @@ Section "Install" SecMain
     File "payload\backend\backend.exe"
     File "payload\backend\.env.enc"
 
-    ; Bundled Chromium browser
+    ; Bundled Chromium browser — copy contents directly into browsers dir
     SetOutPath "${APP_DIR}\browsers"
-    File /r /nonfatal "payload\browsers\*.*"
+    File /nonfatal /r "payload\browsers\*"
 
     ; Frontend (.next + node_modules pre-bundled — no npm install needed)
     SetOutPath "${APP_DIR}\frontend"
