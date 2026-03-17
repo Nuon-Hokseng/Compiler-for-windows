@@ -188,12 +188,14 @@ module.exports = {};
 [System.IO.File]::WriteAllText("$FRONTEND\load-env.js", $loadEnvContent, $utf8NoBOM)
 Write-Log "   load-env.js written."
 
-$nextCfg = "$FRONTEND\next.config.js"
-if (Test-Path $nextCfg) {
-    $cfgContent = Get-Content $nextCfg -Raw
-    if ($cfgContent -notmatch "load-env") {
-        [System.IO.File]::WriteAllText($nextCfg, "require('./load-env');`n" + $cfgContent, $utf8NoBOM)
-        Write-Log "   Patched next.config.js"
+foreach ($cfgFile in @("$FRONTEND\next.config.js", "$FRONTEND\next.config.ts")) {
+    if (Test-Path $cfgFile) {
+        $cfgContent = Get-Content $cfgFile -Raw
+        if ($cfgContent -notmatch "load-env") {
+            [System.IO.File]::WriteAllText($cfgFile, "require('./load-env');`n" + $cfgContent, $utf8NoBOM)
+            Write-Log "   Patched $(Split-Path $cfgFile -Leaf)"
+        }
+        break
     }
 }
 
@@ -303,7 +305,11 @@ Do
     If attempts > 60 Then Exit Do
 Loop While result <> 0
 
-sh.Run "http://localhost:3000"
+If backendUp = 0 And frontendUp = 0 Then
+    sh.Run "http://localhost:3000"
+Else
+    sh.Run "cmd /c echo IG Automation failed to start. Check C:\IGAutomation\setup-log.txt && pause", 1, False
+End If
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, [System.Text.UTF8Encoding]::new($false))
 Write-Log "   start.vbs written."
