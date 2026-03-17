@@ -214,8 +214,8 @@ else
     printf "require('./load-env');\n/** @type {import('next').NextConfig} */\nconst nextConfig = {};\nmodule.exports = nextConfig;\n" > next.config.js
 fi
 
-# Install prod-only deps for bundling
-npm install --omit=dev --silent
+# Install ALL deps (including dev) for build — tailwind/postcss are devDeps
+npm install --silent
 
 # Production build
 npm run build
@@ -224,7 +224,7 @@ npm run build
 # ── SLIM DOWN node_modules ───────────────────────────
 echo "Slimming node_modules..."
 
-# Remove all devDependencies leftovers
+# Prune dev deps AFTER build is complete
 npm prune --omit=dev --silent 2>/dev/null || true
 
 # Remove known large unnecessary folders from node_modules
