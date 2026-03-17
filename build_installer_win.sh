@@ -227,21 +227,37 @@ echo "Slimming node_modules..."
 # Prune dev deps AFTER build is complete
 npm prune --omit=dev --silent 2>/dev/null || true
 
-# Remove known large unnecessary folders from node_modules
-find node_modules -type d -name ".cache"       -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "test"         -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "tests"        -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "__tests__"    -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "docs"         -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "examples"     -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type d -name "coverage"     -exec rm -rf {} + 2>/dev/null || true
-find node_modules -type f -name "*.md"                -delete 2>/dev/null || true
-find node_modules -type f -name "*.ts"    ! -name "*.d.ts" -delete 2>/dev/null || true
-find node_modules -type f -name "*.map"               -delete 2>/dev/null || true
-find node_modules -type f -name "LICENSE*"            -delete 2>/dev/null || true
-find node_modules -type f -name "CHANGELOG*"          -delete 2>/dev/null || true
-find node_modules -type f -name "HISTORY*"            -delete 2>/dev/null || true
-find node_modules -type f -name "AUTHORS*"            -delete 2>/dev/null || true
+# Remove known large unnecessary files/folders using Python (cross-platform safe)
+python3 << 'TRIMEOF'
+import os, shutil, pathlib
+
+base = pathlib.Path("node_modules")
+remove_dirs  = {".cache","test","tests","__tests__","docs","examples","coverage","fixtures"}
+remove_exts  = {".map"}
+remove_names = {"LICENSE","LICENSE.md","LICENSE.txt","CHANGELOG.md","CHANGELOG.txt",
+                "HISTORY.md","AUTHORS","AUTHORS.md","README.md","readme.md"}
+
+removed = 0
+for root, dirs, files in os.walk(base, topdown=True):
+    # Remove dirs in-place to prevent os.walk from descending into them
+    dirs[:] = [d for d in dirs if d not in remove_dirs]
+    for d in list(dirs):
+        full = pathlib.Path(root) / d
+        if d in remove_dirs:
+            shutil.rmtree(full, ignore_errors=True)
+            removed += 1
+    for f in files:
+        fp = pathlib.Path(root) / f
+        if fp.suffix in remove_exts or fp.name in remove_names:
+            try: fp.unlink(); removed += 1
+            except: pass
+        # Remove .ts but keep .d.ts
+        elif fp.suffix == ".ts" and not f.endswith(".d.ts"):
+            try: fp.unlink(); removed += 1
+            except: pass
+
+print(f"[OK] Removed {removed} unnecessary files/dirs from node_modules")
+TRIMEOF
 
 echo "[OK] node_modules slimmed: $(du -sh node_modules | cut -f1)"
 
@@ -287,8 +303,8 @@ cp -r "$SCRIPT_DIR/frontend/.next"          "$BUILD_DIR/payload/frontend/.next"
 cp -r "$SCRIPT_DIR/frontend/node_modules"   "$BUILD_DIR/payload/frontend/node_modules"
 cp    "$SCRIPT_DIR/frontend/package.json"   "$BUILD_DIR/payload/frontend/package.json"
 cp    "$SCRIPT_DIR/frontend/.env.enc"       "$BUILD_DIR/payload/frontend/.env.enc"
-[ -f "$SCRIPT_DIR/frontend/next.config.js" ] && \
-    cp "$SCRIPT_DIR/frontend/next.config.js" "$BUILD_DIR/payload/frontend/next.config.js"
+[ -f "$SCRIPT_DIR/frontend/next.config.js" ] &&     cp "$SCRIPT_DIR/frontend/next.config.js" "$BUILD_DIR/payload/frontend/next.config.js"
+[ -f "$SCRIPT_DIR/frontend/next.config.ts" ] &&     cp "$SCRIPT_DIR/frontend/next.config.ts" "$BUILD_DIR/payload/frontend/next.config.ts"
 echo "[OK] Frontend: $(du -sh "$BUILD_DIR/payload/frontend" | cut -f1)"
 
 cp "$SCRIPT_DIR/setup.ps1"     "$BUILD_DIR/setup.ps1"
