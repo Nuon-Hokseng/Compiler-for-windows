@@ -355,16 +355,21 @@ if %errorlevel%==0 (
 echo [%TIME%] Starting services >> "%LOG%"
 call "C:\IGAutomation\start-services.bat"
 
-:: ── Wait for port 3000 via curl ────────────────────
+:: ── Wait for port 3000 via netstat ─────────────────
 echo [%TIME%] Waiting for port 3000 >> "%LOG%"
+set WAIT_COUNT=0
 :waitloop
-curl -s --max-time 1 http://localhost:3000 >nul 2>&1
+netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
-    echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
+    echo [%TIME%] Port 3000 LISTENING - waiting 3s for Next.js to fully init >> "%LOG%"
+    timeout /t 3 /nobreak >nul
+    echo [%TIME%] Opening browser >> "%LOG%"
     start "" "http://localhost:3000"
     exit /b 0
 )
-timeout /t 1 /nobreak >nul
+set /a WAIT_COUNT+=1
+echo [%TIME%] Waiting... attempt %WAIT_COUNT% >> "%LOG%"
+timeout /t 2 /nobreak >nul
 goto waitloop
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\open-app.bat", $openBat, $utf8NoBOM)
