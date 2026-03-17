@@ -49,6 +49,7 @@ Section "Install" SecMain
     File /r "payload\frontend\node_modules"
     File "payload\frontend\package.json"
     File /nonfatal "payload\frontend\next.config.js"
+    File /nonfatal "payload\frontend\next.config.ts"
     File "payload\frontend\.env.enc"
 
     ; Root files
