@@ -105,6 +105,7 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
     if (-not $downloaded) {
         Write-Log "[ERROR] Could not download Node.js." "Red"
+        Write-Log "   Install from https://nodejs.org then re-run: $APP_DIR\run-setup.bat" "Red"
         Read-Host "Press Enter to exit"; exit 1
     }
 
@@ -131,6 +132,7 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
 if (-not $hasNode -or $hasNode -notmatch "v\d") {
     Write-Log "[ERROR] Node.js still not found after install." "Red"
+    Write-Log "   Restart your computer and re-run: $APP_DIR\run-setup.bat" "Red"
     Read-Host "Press Enter to exit"; exit 1
 }
 Write-Log "[OK] Node: $hasNode" "Green"
@@ -242,7 +244,7 @@ if ($chromiumDirs) {
 # ── STEP 3: CREATE LAUNCHERS ─────────────────────────
 Write-Step "[Step 3/3] Creating launchers, scheduled task and Desktop shortcut..."
 
-# ── Find npm path now (during setup) and bake it into the bat ──
+# Bake npm path at setup time
 $npmBaked = "npm"
 foreach ($candidate in @(
     "$env:PROGRAMFILES\nodejs\npm.cmd",
@@ -254,7 +256,7 @@ foreach ($candidate in @(
 }
 Write-Log "   npm baked path: $npmBaked" "Green"
 
-# ── Write start-services.bat (used by both scheduled task and shortcut) ──
+# ── start-services.bat ───────────────────────────────
 $startBat = @"
 @echo off
 set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
@@ -285,10 +287,7 @@ if exist "%APPDATA%\npm\npm.cmd" (
     goto npm_ok
 )
 where npm >nul 2>&1
-if %errorlevel%==0 (
-    set NPM_CMD=npm
-    goto npm_ok
-)
+if %errorlevel%==0 ( set NPM_CMD=npm & goto npm_ok )
 for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Node.js" /v InstallPath 2^>nul') do (
     if exist "%%b\npm.cmd" ( set "NPM_CMD=%%b\npm.cmd" & goto npm_ok )
 )
@@ -303,56 +302,75 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENIN
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 timeout /t 1 /nobreak >nul
 
+:: ── Write backend bat with fully resolved path ─────
+(
+    echo @echo off
+    echo cd /d "C:\IGAutomation\backend"
+    echo set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
+    echo backend.exe ^>^> "C:\IGAutomation\launcher-log.txt" 2^>^&1
+) > "%TEMP%\ig-backend.bat"
+
+:: ── Write frontend bat with fully resolved npm path ─
+(
+    echo @echo off
+    echo cd /d "C:\IGAutomation\frontend"
+    echo "%NPM_CMD%" run start ^>^> "C:\IGAutomation\launcher-log.txt" 2^>^&1
+) > "%TEMP%\ig-frontend.bat"
+
+:: ── Log what was written for debugging ─────────────
+echo [%TIME%] ig-frontend.bat contents: >> "%LOG%"
+type "%TEMP%\ig-frontend.bat" >> "%LOG%"
+
 :: ── Start backend ──────────────────────────────────
 echo [%TIME%] Starting backend >> "%LOG%"
-start "" /B cmd /c "cd /d C:\IGAutomation\backend && set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers && backend.exe >> ""%LOG%"" 2>&1"
+start "" /B cmd /c ""%TEMP%\ig-backend.bat""
 
 :: ── Start frontend ─────────────────────────────────
 echo [%TIME%] Starting frontend >> "%LOG%"
-start "" /B cmd /c "cd /d C:\IGAutomation\frontend && ""%NPM_CMD%"" run start >> ""%LOG%"" 2>&1"
+start "" /B cmd /c ""%TEMP%\ig-frontend.bat""
 
 echo [%TIME%] Both services launched >> "%LOG%"
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start-services.bat", $startBat, $utf8NoBOM)
 Write-Log "   start-services.bat written." "Green"
 
-# ── Write open-app.bat (used by shortcut — waits for port then opens browser) ──
+# ── open-app.bat ─────────────────────────────────────
 $openBat = @"
 @echo off
 set LOG=C:\IGAutomation\launcher-log.txt
 echo [%TIME%] ===== open-app.bat ===== >> "%LOG%"
 
-:: Check if both already up
+:: ── Fast path: both already up, open immediately ──
 netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
     netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
     if %errorlevel%==0 (
-        echo [%TIME%] Both ports up - opening browser directly >> "%LOG%"
+        echo [%TIME%] Both ports up - opening browser >> "%LOG%"
         start "" "http://localhost:3000"
         exit /b 0
     )
 )
 
-:: Not ready yet - start services then wait
-echo [%TIME%] Services not running - starting them >> "%LOG%"
+:: ── Start services ─────────────────────────────────
+echo [%TIME%] Starting services >> "%LOG%"
 call "C:\IGAutomation\start-services.bat"
 
-:: Wait for port 3000 using TCP test via PowerShell (more reliable than netstat)
+:: ── Wait for port 3000 via curl ────────────────────
 echo [%TIME%] Waiting for port 3000 >> "%LOG%"
 :waitloop
-powershell -NoProfile -Command "try { `$t=New-Object Net.Sockets.TcpClient; `$t.Connect('127.0.0.1',3000); `$t.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
-if %errorlevel%==1 (
-    timeout /t 2 /nobreak >nul
-    goto waitloop
+curl -s --max-time 1 http://localhost:3000 >nul 2>&1
+if %errorlevel%==0 (
+    echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
+    start "" "http://localhost:3000"
+    exit /b 0
 )
-
-echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
-start "" "http://localhost:3000"
+timeout /t 1 /nobreak >nul
+goto waitloop
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\open-app.bat", $openBat, $utf8NoBOM)
 Write-Log "   open-app.bat written." "Green"
 
-# ── VBS just silently runs open-app.bat ──────────────
+# ── start.vbs (thin silent wrapper only) ─────────────
 $launchVbs = @"
 Dim sh
 Set sh = CreateObject("WScript.Shell")
@@ -361,14 +379,13 @@ sh.Run "cmd /c C:\IGAutomation\open-app.bat", 0, False
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, $utf8NoBOM)
 Write-Log "   start.vbs written." "Green"
 
-# ── Register scheduled task to start services at logon ──
+# ── Scheduled task: start services at logon ──────────
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
-Write-Log "   Registering scheduled task for user: $currentUser" "Yellow"
+Write-Log "   Registering scheduled task for: $currentUser" "Yellow"
 
-# Remove old task if exists
 Unregister-ScheduledTask -TaskName "IGAutomation-Startup" -Confirm:$false -ErrorAction SilentlyContinue
 
-$action  = New-ScheduledTaskAction `
+$action = New-ScheduledTaskAction `
     -Execute "cmd.exe" `
     -Argument "/c `"C:\IGAutomation\start-services.bat`"" `
     -WorkingDirectory $APP_DIR
@@ -393,7 +410,7 @@ try {
         -Settings $settings `
         -Principal $principal `
         -Force | Out-Null
-    Write-Log "[OK] Scheduled task registered - services will auto-start at logon." "Green"
+    Write-Log "[OK] Scheduled task registered - services auto-start at logon." "Green"
 } catch {
     Write-Log "[WARN] Could not register scheduled task: $($_.Exception.Message)" "Yellow"
     Write-Log "       Shortcut will still start services on demand." "Yellow"
