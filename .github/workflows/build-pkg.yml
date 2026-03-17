@@ -1,0 +1,71 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Install NSIS
+        run: choco install nsis --yes --no-progress
+
+      - name: Add NSIS to PATH
+        run: echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Install build tools
+        run: |
+          pip install pyinstaller playwright
+          npm install -g terser
+
+      - name: Write backend .env from secret
+        run: echo "${{ secrets.BACKEND_ENV }}" > backend/.env
+
+      - name: Write frontend .env from secret
+        run: echo "${{ secrets.FRONTEND_ENV }}" > frontend/.env
+
+      - name: Encrypt .env files
+        run: python create_env.py
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+
+      - name: Remove plain .env files
+        run: |
+          del backend\.env
+          del frontend\.env
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Build installer EXE
+        run: bash build_installer_win.sh
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: IGAutomation-Windows
+          path: IGAutomation-Setup.exe
+          retention-days: 30
