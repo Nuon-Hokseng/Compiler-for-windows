@@ -302,34 +302,45 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENIN
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: ── Write backend bat with fully resolved path ─────
-(
-    echo @echo off
-    echo cd /d "C:\IGAutomation\backend"
-    echo set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
-    echo backend.exe ^>^> "C:\IGAutomation\launcher-log.txt" 2^>^&1
-) > "%TEMP%\ig-backend.bat"
+:: ── Write backend bat ──────────────────────────────
+set BACKEND_BAT=%TEMP%\ig-backend.bat
+set FRONTEND_BAT=%TEMP%\ig-frontend.bat
+set BACKEND_VBS=%TEMP%\ig-backend.vbs
+set FRONTEND_VBS=%TEMP%\ig-frontend.vbs
 
-:: ── Write frontend bat with fully resolved npm path ─
-(
-    echo @echo off
-    echo cd /d "C:\IGAutomation\frontend"
-    echo "%NPM_CMD%" run start ^>^> "C:\IGAutomation\launcher-log.txt" 2^>^&1
-) > "%TEMP%\ig-frontend.bat"
+echo @echo off > "%BACKEND_BAT%"
+echo cd /d "C:\IGAutomation\backend" >> "%BACKEND_BAT%"
+echo set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers >> "%BACKEND_BAT%"
+echo "C:\IGAutomation\backend\backend.exe" >> "%BACKEND_BAT%"
 
-:: ── Log what was written for debugging ─────────────
+:: ── Write frontend bat with resolved npm path ──────
+echo @echo off > "%FRONTEND_BAT%"
+echo cd /d "C:\IGAutomation\frontend" >> "%FRONTEND_BAT%"
+echo "%NPM_CMD%" run start >> "%FRONTEND_BAT%"
+
+:: ── Log both bat contents for debugging ────────────
+echo [%TIME%] ig-backend.bat contents: >> "%LOG%"
+type "%BACKEND_BAT%" >> "%LOG%"
 echo [%TIME%] ig-frontend.bat contents: >> "%LOG%"
-type "%TEMP%\ig-frontend.bat" >> "%LOG%"
+type "%FRONTEND_BAT%" >> "%LOG%"
 
-:: ── Start backend ──────────────────────────────────
-echo Starting backend...
-start "IG Backend" cmd /k "cd /d ""%BACKEND%"" && backend.exe"
+:: ── Write VBS wrappers for silent (no window) launch
+echo Dim sh > "%BACKEND_VBS%"
+echo Set sh = CreateObject("WScript.Shell") >> "%BACKEND_VBS%"
+echo sh.Run "cmd /c ""%BACKEND_BAT%"" >> ""C:\IGAutomation\launcher-log.txt"" 2>&1", 0, False >> "%BACKEND_VBS%"
 
-:: ── Start frontend ─────────────────────────────────
-echo Starting frontend...
-start "IG Frontend" cmd /k "cd /d ""%FRONTEND%"" && npm run start"
+echo Dim sh > "%FRONTEND_VBS%"
+echo Set sh = CreateObject("WScript.Shell") >> "%FRONTEND_VBS%"
+echo sh.Run "cmd /c ""%FRONTEND_BAT%"" >> ""C:\IGAutomation\launcher-log.txt"" 2>&1", 0, False >> "%FRONTEND_VBS%"
 
-echo [%TIME%] Both services launched >> "%LOG%"
+:: ── Launch both via wscript (zero visible windows) ─
+echo [%TIME%] Starting backend (silent) >> "%LOG%"
+start "" /B wscript.exe "%BACKEND_VBS%"
+
+echo [%TIME%] Starting frontend (silent) >> "%LOG%"
+start "" /B wscript.exe "%FRONTEND_VBS%"
+
+echo [%TIME%] Both services launched silently >> "%LOG%"
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start-services.bat", $startBat, $utf8NoBOM)
 Write-Log "   start-services.bat written." "Green"
@@ -355,27 +366,22 @@ if %errorlevel%==0 (
 echo [%TIME%] Starting services >> "%LOG%"
 call "C:\IGAutomation\start-services.bat"
 
-:: ── Wait for port 3000 via netstat ─────────────────
+:: ── Wait for port 3000 via curl ────────────────────
 echo [%TIME%] Waiting for port 3000 >> "%LOG%"
-set WAIT_COUNT=0
 :waitloop
-netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
+curl -s --max-time 1 http://localhost:3000 >nul 2>&1
 if %errorlevel%==0 (
-    echo [%TIME%] Port 3000 LISTENING - waiting 3s for Next.js to fully init >> "%LOG%"
-    timeout /t 3 /nobreak >nul
-    echo [%TIME%] Opening browser >> "%LOG%"
+    echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
     start "" "http://localhost:3000"
     exit /b 0
 )
-set /a WAIT_COUNT+=1
-echo [%TIME%] Waiting... attempt %WAIT_COUNT% >> "%LOG%"
-timeout /t 2 /nobreak >nul
+timeout /t 1 /nobreak >nul
 goto waitloop
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\open-app.bat", $openBat, $utf8NoBOM)
 Write-Log "   open-app.bat written." "Green"
 
-# ── start.vbs (thin silent wrapper only) ─────────────
+# ── start.vbs (thin silent wrapper for shortcut) ─────
 $launchVbs = @"
 Dim sh
 Set sh = CreateObject("WScript.Shell")
@@ -384,15 +390,24 @@ sh.Run "cmd /c C:\IGAutomation\open-app.bat", 0, False
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, $utf8NoBOM)
 Write-Log "   start.vbs written." "Green"
 
-# ── Scheduled task: start services at logon ──────────
+# ── silent-start.vbs (used by scheduled task) ────────
+$silentVbs = @"
+Dim sh
+Set sh = CreateObject("WScript.Shell")
+sh.Run "cmd /c C:\IGAutomation\start-services.bat", 0, False
+"@
+[System.IO.File]::WriteAllText("$APP_DIR\silent-start.vbs", $silentVbs, $utf8NoBOM)
+Write-Log "   silent-start.vbs written." "Green"
+
+# ── Scheduled task: start services silently at logon ─
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 Write-Log "   Registering scheduled task for: $currentUser" "Yellow"
 
 Unregister-ScheduledTask -TaskName "IGAutomation-Startup" -Confirm:$false -ErrorAction SilentlyContinue
 
 $action = New-ScheduledTaskAction `
-    -Execute "cmd.exe" `
-    -Argument "/c `"C:\IGAutomation\start-services.bat`"" `
+    -Execute "wscript.exe" `
+    -Argument "`"C:\IGAutomation\silent-start.vbs`"" `
     -WorkingDirectory $APP_DIR
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
@@ -415,7 +430,7 @@ try {
         -Settings $settings `
         -Principal $principal `
         -Force | Out-Null
-    Write-Log "[OK] Scheduled task registered - services auto-start at logon." "Green"
+    Write-Log "[OK] Scheduled task registered - services auto-start silently at logon." "Green"
 } catch {
     Write-Log "[WARN] Could not register scheduled task: $($_.Exception.Message)" "Yellow"
     Write-Log "       Shortcut will still start services on demand." "Yellow"
@@ -469,7 +484,7 @@ foreach ($dp in ($desktopPaths | Select-Object -Unique)) {
 Write-Log ""
 Write-Log "================================================" "Magenta"
 Write-Log "  ALL DONE!" "Magenta"
-Write-Log "  Services will auto-start on next logon." "Magenta"
+Write-Log "  Services will auto-start silently at logon." "Magenta"
 Write-Log "  Double-click 'IG Automation' on your Desktop" "Magenta"
 Write-Log "================================================"
 Write-Log "Log: $LOG"
