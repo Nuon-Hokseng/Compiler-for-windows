@@ -11,7 +11,7 @@ function Write-Log($msg, $color = "White") {
     $ts   = Get-Date -Format "HH:mm:ss"
     $line = "[$ts] $msg"
     Write-Host $line -ForegroundColor $color
-    try { Add-Content -Path $LOG -Value $line -ErrorAction SilentlyContinue } catch {}
+    Add-Content -Path $LOG -Value $line -ErrorAction SilentlyContinue
 }
 
 function Write-Step($msg) {
@@ -19,49 +19,31 @@ function Write-Step($msg) {
     Write-Log ">> $msg" "Cyan"
 }
 
-function Refresh-Path {
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("PATH","User")
-}
-
-# Init log
-try {
-    "" | Out-File -FilePath $LOG -Encoding utf8 -Force
-} catch {
-    $LOG = "$env:TEMP\ig-automation-setup.log"
-    "" | Out-File -FilePath $LOG -Encoding utf8 -Force
-}
+"" | Out-File -FilePath $LOG -Encoding utf8 -Force
 
 Write-Log "================================================" "Magenta"
 Write-Log "  IG Automation - Setup" "Magenta"
 Write-Log "================================================"
-Write-Log "APP_DIR = $APP_DIR"
-Write-Log "User    = $env:USERNAME"
-Write-Log "OS      = $([System.Environment]::OSVersion.VersionString)"
-Write-Log "Log     = $LOG"
-
-try {
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force -ErrorAction SilentlyContinue
-} catch {}
+Write-Log "APP_DIR  = $APP_DIR"
+Write-Log "Log file = $LOG"
 
 # ── VERIFY INSTALL ───────────────────────────────────
 if (-not (Test-Path $APP_DIR)) {
     Write-Log "[ERROR] $APP_DIR not found. Please reinstall." "Red"
-    Read-Host "Press Enter to exit"; exit 1
+    exit 1
 }
 if (-not (Test-Path "$BACKEND\backend.exe")) {
     Write-Log "[ERROR] backend.exe missing. Please reinstall." "Red"
-    Read-Host "Press Enter to exit"; exit 1
+    exit 1
 }
 if (-not (Test-Path "$FRONTEND\.next")) {
     Write-Log "[ERROR] Frontend .next folder missing. Please reinstall." "Red"
-    Read-Host "Press Enter to exit"; exit 1
+    exit 1
 }
 Write-Log "[OK] Install verified." "Green"
 
 # ── STEP 1: NODE.JS ──────────────────────────────────
 Write-Step "[Step 1/3] Checking Node.js..."
-Refresh-Path
 
 $hasNode = $null
 try { $hasNode = & node --version 2>&1 } catch {}
@@ -85,28 +67,11 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
     $nodeInstaller = "$env:TEMP\node-lts-x64.msi"
     $nodeUrl       = "https://nodejs.org/dist/v20.19.0/node-v20.19.0-x64.msi"
 
-    $downloaded = $false
-    try {
-        & curl.exe -L --silent --show-error --output $nodeInstaller $nodeUrl
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $nodeInstaller) -and (Get-Item $nodeInstaller).Length -gt 1000000) {
-            $downloaded = $true
-        }
-    } catch {}
-
-    if (-not $downloaded) {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            (New-Object Net.WebClient).DownloadFile($nodeUrl, $nodeInstaller)
-            if ((Test-Path $nodeInstaller) -and (Get-Item $nodeInstaller).Length -gt 1000000) {
-                $downloaded = $true
-            }
-        } catch { Write-Log "   WebClient failed: $($_.Exception.Message)" "Yellow" }
-    }
-
-    if (-not $downloaded) {
-        Write-Log "[ERROR] Could not download Node.js." "Red"
-        Write-Log "   Install from https://nodejs.org then re-run: $APP_DIR\run-setup.bat" "Red"
-        Read-Host "Press Enter to exit"; exit 1
+    & curl.exe -L --silent --show-error --output $nodeInstaller $nodeUrl
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $nodeInstaller) -or (Get-Item $nodeInstaller).Length -lt 1000000) {
+        Write-Log "[ERROR] Failed to download Node.js." "Red"
+        Write-Log "   Install manually from https://nodejs.org then re-run setup." "Red"
+        exit 1
     }
 
     Write-Log "   Installing Node.js silently..." "Yellow"
@@ -115,36 +80,29 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
     if ($proc.ExitCode -notin @(0, 1641, 3010)) {
         Write-Log "[ERROR] Node.js install failed (exit $($proc.ExitCode))" "Red"
-        Read-Host "Press Enter to exit"; exit 1
+        exit 1
     }
 
-    Refresh-Path
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("PATH","User")
     Start-Sleep -Seconds 3
-
-    foreach ($nodePath in @(
-        "$env:PROGRAMFILES\nodejs\node.exe",
-        "$env:ProgramFiles(x86)\nodejs\node.exe"
-    )) {
-        if (Test-Path $nodePath) { $env:PATH = "$env:PATH;$(Split-Path $nodePath)" }
-    }
-    try { $hasNode = & node --version 2>&1 } catch {}
 }
 
+try { $hasNode = & node --version 2>&1 } catch {}
 if (-not $hasNode -or $hasNode -notmatch "v\d") {
-    Write-Log "[ERROR] Node.js still not found after install." "Red"
-    Write-Log "   Restart your computer and re-run: $APP_DIR\run-setup.bat" "Red"
-    Read-Host "Press Enter to exit"; exit 1
+    Write-Log "[ERROR] Node.js still not found. Restart and re-run setup." "Red"
+    exit 1
 }
 Write-Log "[OK] Node: $hasNode" "Green"
 
-$npmPaths = @(
-    (Join-Path $env:PROGRAMFILES "nodejs"),
-    (Join-Path $env:APPDATA "npm"),
-    (Join-Path $env:LOCALAPPDATA "Programs\nodejs")
-)
-foreach ($p in $npmPaths) {
-    if ($p -and (Test-Path (Join-Path $p "npm.cmd"))) {
-        if ($env:PATH -notlike "*$p*") { $env:PATH = "$env:PATH;$p" }
+# Ensure npm on PATH
+foreach ($p in @(
+    "$env:PROGRAMFILES\nodejs",
+    "$env:APPDATA\npm",
+    "$env:LOCALAPPDATA\Programs\nodejs"
+)) {
+    if ($p -and (Test-Path "$p\npm.cmd") -and $env:PATH -notlike "*$p*") {
+        $env:PATH = "$env:PATH;$p"
     }
 }
 try { Write-Log "[OK] npm: $(& npm --version 2>&1)" "Green" } catch {}
@@ -203,6 +161,7 @@ if (Test-Path "$FRONTEND\node_modules") {
     Write-Log "[OK] npm install complete." "Green"
 }
 
+# ── PLAYWRIGHT ───────────────────────────────────────
 $PW_BROWSERS = "C:\IGAutomation\browsers"
 [System.Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", $PW_BROWSERS, "Machine")
 $env:PLAYWRIGHT_BROWSERS_PATH = $PW_BROWSERS
@@ -218,7 +177,9 @@ if ($chromiumDirs) {
     foreach ($p in @("python","python3",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
-        "$env:PROGRAMFILES\Python312\python.exe","C:\Python312\python.exe")) {
+        "$env:PROGRAMFILES\Python312\python.exe",
+        "C:\Python312\python.exe"
+    )) {
         try { $v = & $p --version 2>&1; if ($v -match "3\.(11|12|13)") { $pyExe = $p; break } } catch {}
     }
 
@@ -244,7 +205,7 @@ if ($chromiumDirs) {
 # ── STEP 3: CREATE LAUNCHERS ─────────────────────────
 Write-Step "[Step 3/3] Creating launchers, scheduled task and Desktop shortcut..."
 
-# Bake npm path at setup time
+# Bake npm path at setup time so it works on any machine
 $npmBaked = "npm"
 foreach ($candidate in @(
     "$env:PROGRAMFILES\nodejs\npm.cmd",
@@ -257,35 +218,22 @@ foreach ($candidate in @(
 Write-Log "   npm baked path: $npmBaked" "Green"
 
 # ── start-services.bat ───────────────────────────────
+# Inspired by the original working approach - straightforward, no temp files
+# Uses PowerShell Start-Process for hidden windows instead of cmd /k
 $startBat = @"
 @echo off
-set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
 set LOG=C:\IGAutomation\launcher-log.txt
+set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
 
 echo [%TIME%] ===== start-services.bat ===== >> "%LOG%"
 
 :: ── Find npm ──────────────────────────────────────
 set NPM_CMD=
-if exist "$npmBaked" (
-    set "NPM_CMD=$npmBaked"
-    goto npm_ok
-)
-if exist "%ProgramFiles%\nodejs\npm.cmd" (
-    set "NPM_CMD=%ProgramFiles%\nodejs\npm.cmd"
-    goto npm_ok
-)
-if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" (
-    set "NPM_CMD=%ProgramFiles(x86)%\nodejs\npm.cmd"
-    goto npm_ok
-)
-if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" (
-    set "NPM_CMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd"
-    goto npm_ok
-)
-if exist "%APPDATA%\npm\npm.cmd" (
-    set "NPM_CMD=%APPDATA%\npm\npm.cmd"
-    goto npm_ok
-)
+if exist "$npmBaked" ( set "NPM_CMD=$npmBaked" & goto npm_ok )
+if exist "%ProgramFiles%\nodejs\npm.cmd" ( set "NPM_CMD=%ProgramFiles%\nodejs\npm.cmd" & goto npm_ok )
+if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" ( set "NPM_CMD=%ProgramFiles(x86)%\nodejs\npm.cmd" & goto npm_ok )
+if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" ( set "NPM_CMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd" & goto npm_ok )
+if exist "%APPDATA%\npm\npm.cmd" ( set "NPM_CMD=%APPDATA%\npm\npm.cmd" & goto npm_ok )
 where npm >nul 2>&1
 if %errorlevel%==0 ( set NPM_CMD=npm & goto npm_ok )
 for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Node.js" /v InstallPath 2^>nul') do (
@@ -297,61 +245,46 @@ exit /b 1
 :npm_ok
 echo [%TIME%] npm=%NPM_CMD% >> "%LOG%"
 
-:: ── Kill stale on 8000 / 3000 ─────────────────────
+:: ── Kill stale processes on 8000 and 3000 ─────────
+echo [%TIME%] Killing stale processes... >> "%LOG%"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: ── Write backend bat ──────────────────────────────
-set BACKEND_BAT=%TEMP%\ig-backend.bat
-set FRONTEND_BAT=%TEMP%\ig-frontend.bat
-set BACKEND_VBS=%TEMP%\ig-backend.vbs
-set FRONTEND_VBS=%TEMP%\ig-frontend.vbs
+:: ── Start backend hidden via PowerShell ───────────
+echo [%TIME%] Starting backend... >> "%LOG%"
+powershell -NoProfile -WindowStyle Hidden -Command ^
+  "Start-Process -FilePath 'C:\IGAutomation\backend\backend.exe' ^
+   -WorkingDirectory 'C:\IGAutomation\backend' ^
+   -WindowStyle Hidden ^
+   -RedirectStandardOutput 'C:\IGAutomation\backend-out.txt' ^
+   -RedirectStandardError 'C:\IGAutomation\backend-err.txt'"
+echo [%TIME%] Backend process started >> "%LOG%"
 
-echo @echo off > "%BACKEND_BAT%"
-echo cd /d "C:\IGAutomation\backend" >> "%BACKEND_BAT%"
-echo set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers >> "%BACKEND_BAT%"
-echo "C:\IGAutomation\backend\backend.exe" >> "%BACKEND_BAT%"
+:: ── Start frontend hidden via PowerShell ──────────
+echo [%TIME%] Starting frontend... >> "%LOG%"
+powershell -NoProfile -WindowStyle Hidden -Command ^
+  "Start-Process -FilePath '%NPM_CMD%' ^
+   -ArgumentList 'run','start' ^
+   -WorkingDirectory 'C:\IGAutomation\frontend' ^
+   -WindowStyle Hidden ^
+   -RedirectStandardOutput 'C:\IGAutomation\frontend-out.txt' ^
+   -RedirectStandardError 'C:\IGAutomation\frontend-err.txt'"
+echo [%TIME%] Frontend process started >> "%LOG%"
 
-:: ── Write frontend bat with resolved npm path ──────
-echo @echo off > "%FRONTEND_BAT%"
-echo cd /d "C:\IGAutomation\frontend" >> "%FRONTEND_BAT%"
-echo "%NPM_CMD%" run start >> "%FRONTEND_BAT%"
-
-:: ── Log both bat contents for debugging ────────────
-echo [%TIME%] ig-backend.bat contents: >> "%LOG%"
-type "%BACKEND_BAT%" >> "%LOG%"
-echo [%TIME%] ig-frontend.bat contents: >> "%LOG%"
-type "%FRONTEND_BAT%" >> "%LOG%"
-
-:: ── Write VBS wrappers for silent (no window) launch
-echo Dim sh > "%BACKEND_VBS%"
-echo Set sh = CreateObject("WScript.Shell") >> "%BACKEND_VBS%"
-echo sh.Run "cmd /c ""%BACKEND_BAT%"" >> ""C:\IGAutomation\launcher-log.txt"" 2>&1", 0, False >> "%BACKEND_VBS%"
-
-echo Dim sh > "%FRONTEND_VBS%"
-echo Set sh = CreateObject("WScript.Shell") >> "%FRONTEND_VBS%"
-echo sh.Run "cmd /c ""%FRONTEND_BAT%"" >> ""C:\IGAutomation\launcher-log.txt"" 2>&1", 0, False >> "%FRONTEND_VBS%"
-
-:: ── Launch both via wscript (zero visible windows) ─
-echo [%TIME%] Starting backend (silent) >> "%LOG%"
-start "" /B wscript.exe "%BACKEND_VBS%"
-
-echo [%TIME%] Starting frontend (silent) >> "%LOG%"
-start "" /B wscript.exe "%FRONTEND_VBS%"
-
-echo [%TIME%] Both services launched silently >> "%LOG%"
+echo [%TIME%] Both services launched >> "%LOG%"
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start-services.bat", $startBat, $utf8NoBOM)
 Write-Log "   start-services.bat written." "Green"
 
 # ── open-app.bat ─────────────────────────────────────
+# Inspired by original: simple netstat loop, open browser when ready
 $openBat = @"
 @echo off
 set LOG=C:\IGAutomation\launcher-log.txt
 echo [%TIME%] ===== open-app.bat ===== >> "%LOG%"
 
-:: ── Fast path: both already up, open immediately ──
+:: ── Fast path: both already up ────────────────────
 netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
     netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
@@ -362,26 +295,32 @@ if %errorlevel%==0 (
     )
 )
 
-:: ── Start services ─────────────────────────────────
+:: ── Services not running - start them ─────────────
 echo [%TIME%] Starting services >> "%LOG%"
 call "C:\IGAutomation\start-services.bat"
 
-:: ── Wait for port 3000 via curl ────────────────────
-echo [%TIME%] Waiting for port 3000 >> "%LOG%"
-:waitloop
-curl -s --max-time 1 http://localhost:3000 >nul 2>&1
-if %errorlevel%==0 (
-    echo [%TIME%] Port 3000 ready - opening browser >> "%LOG%"
-    start "" "http://localhost:3000"
-    exit /b 0
-)
-timeout /t 1 /nobreak >nul
-goto waitloop
+:: ── Wait for backend on port 8000 ─────────────────
+echo [%TIME%] Waiting for backend on port 8000... >> "%LOG%"
+:wait_backend
+timeout /t 2 /nobreak >nul
+netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 goto wait_backend
+echo [%TIME%] Backend ready >> "%LOG%"
+
+:: ── Wait for frontend on port 3000 ────────────────
+echo [%TIME%] Waiting for frontend on port 3000... >> "%LOG%"
+:wait_frontend
+timeout /t 2 /nobreak >nul
+netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 goto wait_frontend
+echo [%TIME%] Frontend ready - opening browser >> "%LOG%"
+
+start "" "http://localhost:3000"
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\open-app.bat", $openBat, $utf8NoBOM)
 Write-Log "   open-app.bat written." "Green"
 
-# ── start.vbs (thin silent wrapper for shortcut) ─────
+# ── start.vbs (silent wrapper for shortcut) ──────────
 $launchVbs = @"
 Dim sh
 Set sh = CreateObject("WScript.Shell")
@@ -390,7 +329,7 @@ sh.Run "cmd /c C:\IGAutomation\open-app.bat", 0, False
 [System.IO.File]::WriteAllText("$APP_DIR\start.vbs", $launchVbs, $utf8NoBOM)
 Write-Log "   start.vbs written." "Green"
 
-# ── silent-start.vbs (used by scheduled task) ────────
+# ── silent-start.vbs (for scheduled task) ────────────
 $silentVbs = @"
 Dim sh
 Set sh = CreateObject("WScript.Shell")
@@ -399,7 +338,7 @@ sh.Run "cmd /c C:\IGAutomation\start-services.bat", 0, False
 [System.IO.File]::WriteAllText("$APP_DIR\silent-start.vbs", $silentVbs, $utf8NoBOM)
 Write-Log "   silent-start.vbs written." "Green"
 
-# ── Scheduled task: start services silently at logon ─
+# ── Scheduled task: auto-start services at logon ─────
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 Write-Log "   Registering scheduled task for: $currentUser" "Yellow"
 
