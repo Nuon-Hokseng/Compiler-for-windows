@@ -322,12 +322,12 @@ echo [%TIME%] ig-frontend.bat contents: >> "%LOG%"
 type "%TEMP%\ig-frontend.bat" >> "%LOG%"
 
 :: ── Start backend ──────────────────────────────────
-echo [%TIME%] Starting backend >> "%LOG%"
-start "" /B cmd /c ""%TEMP%\ig-backend.bat""
+echo Starting backend...
+start "IG Backend" cmd /k "cd /d ""%BACKEND%"" && backend.exe"
 
 :: ── Start frontend ─────────────────────────────────
-echo [%TIME%] Starting frontend >> "%LOG%"
-start "" /B cmd /c ""%TEMP%\ig-frontend.bat""
+echo Starting frontend...
+start "IG Frontend" cmd /k "cd /d ""%FRONTEND%"" && npm run start"
 
 echo [%TIME%] Both services launched >> "%LOG%"
 "@
