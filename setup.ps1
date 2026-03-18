@@ -29,16 +29,13 @@ Write-Log "Log file = $LOG"
 
 # ── VERIFY INSTALL ───────────────────────────────────
 if (-not (Test-Path $APP_DIR)) {
-    Write-Log "[ERROR] $APP_DIR not found. Please reinstall." "Red"
-    exit 1
+    Write-Log "[ERROR] $APP_DIR not found. Please reinstall." "Red"; exit 1
 }
 if (-not (Test-Path "$BACKEND\backend.exe")) {
-    Write-Log "[ERROR] backend.exe missing. Please reinstall." "Red"
-    exit 1
+    Write-Log "[ERROR] backend.exe missing. Please reinstall." "Red"; exit 1
 }
 if (-not (Test-Path "$FRONTEND\.next")) {
-    Write-Log "[ERROR] Frontend .next folder missing. Please reinstall." "Red"
-    exit 1
+    Write-Log "[ERROR] Frontend .next folder missing. Please reinstall." "Red"; exit 1
 }
 Write-Log "[OK] Install verified." "Green"
 
@@ -69,9 +66,7 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
     & curl.exe -L --silent --show-error --output $nodeInstaller $nodeUrl
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $nodeInstaller) -or (Get-Item $nodeInstaller).Length -lt 1000000) {
-        Write-Log "[ERROR] Failed to download Node.js." "Red"
-        Write-Log "   Install manually from https://nodejs.org then re-run setup." "Red"
-        exit 1
+        Write-Log "[ERROR] Failed to download Node.js." "Red"; exit 1
     }
 
     Write-Log "   Installing Node.js silently..." "Yellow"
@@ -79,8 +74,7 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
     Remove-Item $nodeInstaller -ErrorAction SilentlyContinue
 
     if ($proc.ExitCode -notin @(0, 1641, 3010)) {
-        Write-Log "[ERROR] Node.js install failed (exit $($proc.ExitCode))" "Red"
-        exit 1
+        Write-Log "[ERROR] Node.js install failed (exit $($proc.ExitCode))" "Red"; exit 1
     }
 
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
@@ -90,12 +84,10 @@ if (-not $hasNode -or $hasNode -notmatch "v\d") {
 
 try { $hasNode = & node --version 2>&1 } catch {}
 if (-not $hasNode -or $hasNode -notmatch "v\d") {
-    Write-Log "[ERROR] Node.js still not found. Restart and re-run setup." "Red"
-    exit 1
+    Write-Log "[ERROR] Node.js still not found. Restart and re-run setup." "Red"; exit 1
 }
 Write-Log "[OK] Node: $hasNode" "Green"
 
-# Ensure npm on PATH
 foreach ($p in @(
     "$env:PROGRAMFILES\nodejs",
     "$env:APPDATA\npm",
@@ -205,7 +197,7 @@ if ($chromiumDirs) {
 # ── STEP 3: CREATE LAUNCHERS ─────────────────────────
 Write-Step "[Step 3/3] Creating launchers, scheduled task and Desktop shortcut..."
 
-# Bake npm path at setup time so it works on any machine
+# Bake npm path at setup time
 $npmBaked = "npm"
 foreach ($candidate in @(
     "$env:PROGRAMFILES\nodejs\npm.cmd",
@@ -217,82 +209,84 @@ foreach ($candidate in @(
 }
 Write-Log "   npm baked path: $npmBaked" "Green"
 
+# ── ig-launcher.ps1 (written directly - no bat generation) ──
+$launcherPs1 = @"
+`$env:PLAYWRIGHT_BROWSERS_PATH = 'C:\IGAutomation\browsers'
+
+function Write-LaunchLog(`$msg) {
+    Add-Content 'C:\IGAutomation\launcher-log.txt' "[`$((Get-Date).ToString('HH:mm:ss'))] `$msg"
+}
+
+# Start backend
+Write-LaunchLog 'ps1: starting backend...'
+Start-Process ``
+    -FilePath 'C:\IGAutomation\backend\backend.exe' ``
+    -WorkingDirectory 'C:\IGAutomation\backend' ``
+    -NoNewWindow ``
+    -RedirectStandardOutput 'C:\IGAutomation\backend-out.txt' ``
+    -RedirectStandardError 'C:\IGAutomation\backend-err.txt'
+Write-LaunchLog 'ps1: backend started'
+
+# Find npm
+`$npmCmd = '$npmBaked'
+if (-not (Test-Path `$npmCmd)) {
+    foreach (`$p in @(
+        'C:\Program Files\nodejs\npm.cmd',
+        'C:\Program Files (x86)\nodejs\npm.cmd',
+        "`$env:LOCALAPPDATA\Programs\nodejs\npm.cmd",
+        "`$env:APPDATA\npm\npm.cmd"
+    )) {
+        if (Test-Path `$p) { `$npmCmd = `$p; break }
+    }
+}
+if (-not (Test-Path `$npmCmd)) {
+    `$found = Get-Command npm -ErrorAction SilentlyContinue
+    if (`$found) { `$npmCmd = `$found.Source }
+}
+Write-LaunchLog "ps1: npm=`$npmCmd"
+
+# Start frontend
+Write-LaunchLog 'ps1: starting frontend...'
+Start-Process ``
+    -FilePath `$npmCmd ``
+    -ArgumentList 'run','start' ``
+    -WorkingDirectory 'C:\IGAutomation\frontend' ``
+    -NoNewWindow ``
+    -RedirectStandardOutput 'C:\IGAutomation\frontend-out.txt' ``
+    -RedirectStandardError 'C:\IGAutomation\frontend-err.txt'
+Write-LaunchLog 'ps1: frontend started'
+"@
+[System.IO.File]::WriteAllText("$APP_DIR\ig-launcher.ps1", $launcherPs1, $utf8NoBOM)
+Write-Log "   ig-launcher.ps1 written." "Green"
+
 # ── start-services.bat ───────────────────────────────
-# Inspired by the original working approach - straightforward, no temp files
-# Uses PowerShell Start-Process for hidden windows instead of cmd /k
 $startBat = @"
 @echo off
 set LOG=C:\IGAutomation\launcher-log.txt
-set PLAYWRIGHT_BROWSERS_PATH=C:\IGAutomation\browsers
 
 echo [%TIME%] ===== start-services.bat ===== >> "%LOG%"
 
-:: ── Find npm ──────────────────────────────────────
-set NPM_CMD=
-if exist "$npmBaked" ( set "NPM_CMD=$npmBaked" & goto npm_ok )
-if exist "%ProgramFiles%\nodejs\npm.cmd" ( set "NPM_CMD=%ProgramFiles%\nodejs\npm.cmd" & goto npm_ok )
-if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" ( set "NPM_CMD=%ProgramFiles(x86)%\nodejs\npm.cmd" & goto npm_ok )
-if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" ( set "NPM_CMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd" & goto npm_ok )
-if exist "%APPDATA%\npm\npm.cmd" ( set "NPM_CMD=%APPDATA%\npm\npm.cmd" & goto npm_ok )
-where npm >nul 2>&1
-if %errorlevel%==0 ( set NPM_CMD=npm & goto npm_ok )
-for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Node.js" /v InstallPath 2^>nul') do (
-    if exist "%%b\npm.cmd" ( set "NPM_CMD=%%b\npm.cmd" & goto npm_ok )
-)
-echo [%TIME%] [ERROR] npm not found >> "%LOG%"
-exit /b 1
-
-:npm_ok
-echo [%TIME%] npm=%NPM_CMD% >> "%LOG%"
-
-:: ── Kill stale processes ───────────────────────────
+:: Kill stale processes
 echo [%TIME%] Killing stale processes... >> "%LOG%"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: ── Write launcher ps1 (handles both services, truly hidden) ──
-set PS1=%TEMP%\ig-launcher.ps1
-
-(
-echo `$env:PLAYWRIGHT_BROWSERS_PATH = 'C:\IGAutomation\browsers'
-echo `$backendLog = 'C:\IGAutomation\backend-out.txt'
-echo `$frontendLog = 'C:\IGAutomation\frontend-out.txt'
-echo.
-echo # Start backend
-echo Start-Process ^`
-echo     -FilePath 'C:\IGAutomation\backend\backend.exe' ^`
-echo     -WorkingDirectory 'C:\IGAutomation\backend' ^`
-echo     -NoNewWindow ^`
-echo     -RedirectStandardOutput `$backendLog ^`
-echo     -RedirectStandardError `$backendLog
-echo.
-echo # Start frontend
-echo Start-Process ^`
-echo     -FilePath '$npmBaked' ^`
-echo     -ArgumentList 'run','start' ^`
-echo     -WorkingDirectory 'C:\IGAutomation\frontend' ^`
-echo     -NoNewWindow ^`
-echo     -RedirectStandardOutput `$frontendLog ^`
-echo     -RedirectStandardError `$frontendLog
-) > "%PS1%"
-
-echo [%TIME%] Launching both services via hidden PowerShell... >> "%LOG%"
-powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%PS1%"
-
+:: Launch both services via hidden PowerShell
+echo [%TIME%] Launching services via ps1... >> "%LOG%"
+powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\IGAutomation\ig-launcher.ps1"
 echo [%TIME%] Both services launched >> "%LOG%"
 "@
 [System.IO.File]::WriteAllText("$APP_DIR\start-services.bat", $startBat, $utf8NoBOM)
 Write-Log "   start-services.bat written." "Green"
 
 # ── open-app.bat ─────────────────────────────────────
-# Inspired by original: simple netstat loop, open browser when ready
 $openBat = @"
 @echo off
 set LOG=C:\IGAutomation\launcher-log.txt
 echo [%TIME%] ===== open-app.bat ===== >> "%LOG%"
 
-:: ── Fast path: both already up ────────────────────
+:: Fast path - both already up
 netstat -an | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
     netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
@@ -303,11 +297,11 @@ if %errorlevel%==0 (
     )
 )
 
-:: ── Services not running - start them ─────────────
+:: Start services
 echo [%TIME%] Starting services >> "%LOG%"
 call "C:\IGAutomation\start-services.bat"
 
-:: ── Wait for backend on port 8000 ─────────────────
+:: Wait for backend
 echo [%TIME%] Waiting for backend on port 8000... >> "%LOG%"
 :wait_backend
 timeout /t 2 /nobreak >nul
@@ -315,7 +309,7 @@ netstat -an | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto wait_backend
 echo [%TIME%] Backend ready >> "%LOG%"
 
-:: ── Wait for frontend on port 3000 ────────────────
+:: Wait for frontend
 echo [%TIME%] Waiting for frontend on port 3000... >> "%LOG%"
 :wait_frontend
 timeout /t 2 /nobreak >nul
@@ -346,7 +340,7 @@ sh.Run "cmd /c C:\IGAutomation\start-services.bat", 0, False
 [System.IO.File]::WriteAllText("$APP_DIR\silent-start.vbs", $silentVbs, $utf8NoBOM)
 Write-Log "   silent-start.vbs written." "Green"
 
-# ── Scheduled task: auto-start services at logon ─────
+# ── Scheduled task ────────────────────────────────────
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 Write-Log "   Registering scheduled task for: $currentUser" "Yellow"
 
