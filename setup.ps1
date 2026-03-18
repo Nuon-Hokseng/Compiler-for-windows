@@ -245,32 +245,40 @@ exit /b 1
 :npm_ok
 echo [%TIME%] npm=%NPM_CMD% >> "%LOG%"
 
-:: ── Kill stale processes on 8000 and 3000 ─────────
+:: ── Kill stale processes ───────────────────────────
 echo [%TIME%] Killing stale processes... >> "%LOG%"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: ── Start backend hidden via PowerShell ───────────
-echo [%TIME%] Starting backend... >> "%LOG%"
-powershell -NoProfile -WindowStyle Hidden -Command ^
-  "Start-Process -FilePath 'C:\IGAutomation\backend\backend.exe' ^
-   -WorkingDirectory 'C:\IGAutomation\backend' ^
-   -WindowStyle Hidden ^
-   -RedirectStandardOutput 'C:\IGAutomation\backend-out.txt' ^
-   -RedirectStandardError 'C:\IGAutomation\backend-err.txt'"
-echo [%TIME%] Backend process started >> "%LOG%"
+:: ── Write launcher ps1 (handles both services, truly hidden) ──
+set PS1=%TEMP%\ig-launcher.ps1
 
-:: ── Start frontend hidden via PowerShell ──────────
-echo [%TIME%] Starting frontend... >> "%LOG%"
-powershell -NoProfile -WindowStyle Hidden -Command ^
-  "Start-Process -FilePath '%NPM_CMD%' ^
-   -ArgumentList 'run','start' ^
-   -WorkingDirectory 'C:\IGAutomation\frontend' ^
-   -WindowStyle Hidden ^
-   -RedirectStandardOutput 'C:\IGAutomation\frontend-out.txt' ^
-   -RedirectStandardError 'C:\IGAutomation\frontend-err.txt'"
-echo [%TIME%] Frontend process started >> "%LOG%"
+(
+echo `$env:PLAYWRIGHT_BROWSERS_PATH = 'C:\IGAutomation\browsers'
+echo `$backendLog = 'C:\IGAutomation\backend-out.txt'
+echo `$frontendLog = 'C:\IGAutomation\frontend-out.txt'
+echo.
+echo # Start backend
+echo Start-Process ^`
+echo     -FilePath 'C:\IGAutomation\backend\backend.exe' ^`
+echo     -WorkingDirectory 'C:\IGAutomation\backend' ^`
+echo     -NoNewWindow ^`
+echo     -RedirectStandardOutput `$backendLog ^`
+echo     -RedirectStandardError `$backendLog
+echo.
+echo # Start frontend
+echo Start-Process ^`
+echo     -FilePath '$npmBaked' ^`
+echo     -ArgumentList 'run','start' ^`
+echo     -WorkingDirectory 'C:\IGAutomation\frontend' ^`
+echo     -NoNewWindow ^`
+echo     -RedirectStandardOutput `$frontendLog ^`
+echo     -RedirectStandardError `$frontendLog
+) > "%PS1%"
+
+echo [%TIME%] Launching both services via hidden PowerShell... >> "%LOG%"
+powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%PS1%"
 
 echo [%TIME%] Both services launched >> "%LOG%"
 "@
