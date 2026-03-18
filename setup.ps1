@@ -421,7 +421,17 @@ foreach ($dp in ($desktopPaths | Select-Object -Unique)) {
         }
     }
 }
-
+# Delete setup.ps1
+# ── SELF-DELETE SETUP SCRIPT ─────────────────────────
+Write-Log "   Removing setup.ps1 for security..." "Yellow"
+$setupScript = $MyInvocation.MyCommand.Path
+if ($setupScript -and (Test-Path $setupScript)) {
+    # Use cmd to delete the file after PowerShell releases it
+    Start-Process "cmd.exe" -ArgumentList "/c timeout /t 2 /nobreak >nul && del /f /q `"$setupScript`"" -WindowStyle Hidden
+    Write-Log "[OK] setup.ps1 scheduled for deletion." "Green"
+} else {
+    Write-Log "[WARN] Could not determine setup.ps1 path - delete it manually." "Yellow"
+}
 Write-Log ""
 Write-Log "================================================" "Magenta"
 Write-Log "  ALL DONE!" "Magenta"
