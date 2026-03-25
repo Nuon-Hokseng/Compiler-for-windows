@@ -83,7 +83,7 @@ Evaluate."""
 class QualificationBrain:
     """Scores and qualifies Instagram profiles against target criteria."""
 
-    def __init__(self, model: str = "llama3:8b", temperature: float = 0):
+    def __init__(self, model: str = "claude-3-haiku-20240307", temperature: float = 0):
         if model.startswith("gpt-"):
             from langchain_openai import ChatOpenAI
             self.llm = ChatOpenAI(model=model, temperature=temperature)
@@ -91,8 +91,8 @@ class QualificationBrain:
             from langchain_anthropic import ChatAnthropic
             self.llm = ChatAnthropic(model=model, temperature=temperature)
         else:
-            from langchain_community.chat_models import ChatOllama
-            self.llm = ChatOllama(model=model, temperature=temperature)
+            raise ValueError(f"Unsupported model: {model}")
+            # removed local loading
 
     def qualify_profiles(self, profiles: list[dict]) -> list[dict]:
         """
@@ -271,7 +271,7 @@ def qualify_profiles(
     return brain.qualify_profiles(profiles)
 
 
-def make_inline_qualifier(model: str = "llama3:8b") -> callable:
+def make_inline_qualifier(model: str = "claude-3-haiku-20240307") -> callable:
     """
     Create a reusable single-profile qualifier function for inline use.
 

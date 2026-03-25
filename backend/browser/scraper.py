@@ -484,7 +484,7 @@ async def run_scraper(target_customer: str, cookies: list[dict], max_commenters:
     scraper = InstagramScraper(
         target_customer=target_customer,
         cookies=cookies,
-        headless=False,
+        headless=DEFAULT_HEADLESS,
         max_commenters=max_commenters,
         browser_type=browser_type,
     )

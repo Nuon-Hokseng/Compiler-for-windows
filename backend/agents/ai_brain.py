@@ -4,8 +4,8 @@ from config.targets import get_target_config
 BATCH_SIZE = 10
 
 
-class OllamaBrain:
-    def __init__(self, target_customer: str, model: str = "llama3:8b"):
+class AIBrain:
+    def __init__(self, target_customer: str, model: str = "claude-3-haiku-20240307"):
         if model.startswith("gpt-"):
             from langchain_openai import ChatOpenAI
             self.llm = ChatOpenAI(model=model, temperature=0.1)
@@ -13,8 +13,8 @@ class OllamaBrain:
             from langchain_anthropic import ChatAnthropic
             self.llm = ChatAnthropic(model=model, temperature=0.1)
         else:
-            from langchain_ollama import OllamaLLM
-            self.llm = OllamaLLM(model=model, temperature=0.1)
+            raise ValueError(f"Unsupported local model: {model}")
+            # removed local loading
         self.target_customer = target_customer
         self.config = get_target_config(target_customer)
         
@@ -112,7 +112,7 @@ Return [] only if ALL accounts are spam/bots."""
         return final_results
 
 
-def analyze_accounts(users: list[dict], target_customer: str, model: str = "llama3:8b") -> list[dict]:
+def analyze_accounts(users: list[dict], target_customer: str, model: str = "claude-3-haiku-20240307") -> list[dict]:
     if not users:
         return []
     
@@ -126,5 +126,5 @@ def analyze_accounts(users: list[dict], target_customer: str, model: str = "llam
     
     print(f"  Analyzing {len(unique_users)} unique accounts...")
     
-    brain = OllamaBrain(target_customer=target_customer, model=model)
+    brain = AIBrain(target_customer=target_customer, model=model)
     return brain.filter_accounts(unique_users)

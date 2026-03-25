@@ -22,6 +22,14 @@ class TaskStatus(str, Enum):
     STOPPED = "stopped"
 
 
+class CampaignRunStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
 class TaskInfo(BaseModel):
     task_id: str
     status: TaskStatus
@@ -31,9 +39,25 @@ class TaskInfo(BaseModel):
     logs: list[str] = []
 
 
+class CampaignRunInfo(BaseModel):
+    campaign_id: int
+    user_id: int
+    task_id: str
+    target_interest: str
+    status: CampaignRunStatus
+    message: str = ""
+    created_at: str
+    updated_at: str
+
+
 # In-memory store for background tasks
 _tasks: dict[str, TaskInfo] = {}
 _stop_flags: dict[str, bool] = {}
+_campaign_runs: dict[int, CampaignRunInfo] = {}
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
 
 
 def create_task(description: str = "") -> TaskInfo:
@@ -95,6 +119,53 @@ def list_all_tasks() -> list[TaskInfo]:
     return list(_tasks.values())
 
 
+def get_campaign_run(campaign_id: int) -> Optional[CampaignRunInfo]:
+    return _campaign_runs.get(campaign_id)
+
+
+def get_active_campaign_run_for_user(user_id: int) -> Optional[CampaignRunInfo]:
+    for run in _campaign_runs.values():
+        if run.user_id == user_id and run.status in (CampaignRunStatus.PENDING, CampaignRunStatus.RUNNING):
+            return run
+    return None
+
+
+def register_campaign_run(campaign_id: int, user_id: int, task_id: str, target_interest: str) -> CampaignRunInfo:
+    now = _now_iso()
+    run = CampaignRunInfo(
+        campaign_id=campaign_id,
+        user_id=user_id,
+        task_id=task_id,
+        target_interest=target_interest,
+        status=CampaignRunStatus.PENDING,
+        message="Campaign queued",
+        created_at=now,
+        updated_at=now,
+    )
+    _campaign_runs[campaign_id] = run
+    return run
+
+
+def update_campaign_run(
+    campaign_id: int,
+    *,
+    status: CampaignRunStatus | None = None,
+    message: str | None = None,
+    task_id: str | None = None,
+) -> Optional[CampaignRunInfo]:
+    run = _campaign_runs.get(campaign_id)
+    if not run:
+        return None
+    if status is not None:
+        run.status = status
+    if message is not None:
+        run.message = message
+    if task_id is not None:
+        run.task_id = task_id
+    run.updated_at = _now_iso()
+    return run
+
+
 def make_log_fn(task_id: str):
     """Create a log function that appends to the task's log list."""
     def log(msg: str):
@@ -133,15 +204,21 @@ class SessionRequest(BaseModel):
     browser_type: BROWSER_TYPE_CHOICES = Field("chrome", description="Browser engine: chrome, firefox, or webkit")
 
 
+class ExtensionSessionRequest(BaseModel):
+    user_id: int = Field(..., description="User id from the authentication table")
+    cookies: list[dict] = Field(..., description="Array of cookies extracted from the Chrome extension")
+    instagram_username: Optional[str] = Field(None, description="Optional Instagram username if known")
+
+
 class AnalyzeAccountsRequest(BaseModel):
     users: list[dict] = Field(..., description="List of user dicts with at least a 'username' key")
     target_customer: str = Field(..., description="Target customer key, e.g. 'car', 'skincare', 'ideal'")
-    model: str = Field("llama3:8b", description="Ollama model name")
+    model: str = Field("claude-3-haiku-20240307", description="Model name")
 
 
 class ClassifyAccountsRequest(BaseModel):
     users: list[dict] = Field(..., description="List of user dicts (username, bio, post_summary, etc.)")
-    model: str = Field("llama3:8b", description="Ollama model name")
+    model: str = Field("claude-3-haiku-20240307", description="Model name")
 
 
 class ExportCSVRequest(BaseModel):
@@ -163,16 +240,16 @@ class CreateSampleCSVRequest(BaseModel):
 class ScrapeRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     target_customer: str = Field(..., description="Target customer key")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     max_commenters: int = Field(15, description="Max commenters to extract per post")
-    model: str = Field("llama3:8b", description="Ollama model for analysis")
+    model: str = Field("claude-3-haiku-20240307", description="Model for analysis")
     browser_type: BROWSER_TYPE_CHOICES = Field("chrome", description="Browser engine: chrome, firefox, or webkit")
 
 
 class ScrollRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     duration: int = Field(60, description="Session duration in seconds")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     infinite_mode: bool = Field(False, description="Enable infinite scroll mode with rest cycles")
     browser_type: BROWSER_TYPE_CHOICES = Field("chrome", description="Browser engine: chrome, firefox, or webkit")
 
@@ -180,7 +257,7 @@ class ScrollRequest(BaseModel):
 class CombinedScrollRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     duration: int = Field(60, description="Session duration in seconds")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     infinite_mode: bool = Field(False, description="Enable infinite mode with rest cycles")
     search_targets: Optional[list[str]] = Field(None, description="Targets to randomly search/explore")
     search_chance: float = Field(0.30, description="Probability of exploring a target per scroll cycle")
@@ -192,11 +269,11 @@ class CombinedScrollRequest(BaseModel):
 class ScraperScrollRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     duration: int = Field(60, description="Session duration in seconds")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     infinite_mode: bool = Field(False, description="Enable infinite mode")
     target_customer: str = Field("car", description="Target customer key for scraper pipeline")
     scraper_chance: float = Field(0.20, description="Probability of triggering scraper per scroll")
-    model: str = Field("llama3:8b", description="Ollama model name")
+    model: str = Field("claude-3-haiku-20240307", description="Model name")
     search_targets: Optional[list[str]] = Field(None, description="Extra search targets")
     search_chance: float = Field(0.30, description="Probability of random explore")
     profile_scroll_count_min: int = Field(3)
@@ -207,7 +284,7 @@ class ScraperScrollRequest(BaseModel):
 class CSVProfileVisitRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     csv_path: str = Field(..., description="Path to CSV file containing targets to visit")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     scroll_count_min: int = Field(3, description="Min scrolls per profile")
     scroll_count_max: int = Field(8, description="Max scrolls per profile")
     delay_min: int = Field(5, description="Min seconds delay between profile visits")
@@ -220,9 +297,30 @@ class SearchRequest(BaseModel):
     user_id: int = Field(..., description="User id from authentication table (cookies loaded from DB)")
     search_term: str = Field(..., description="The term to search for")
     search_type: str = Field("hashtag", description="'hashtag' or 'username'")
-    headless: bool = Field(False, description="Run browser in headless mode (default: visible)")
+    headless: bool = Field(True, description="Run browser in headless mode (default: visible)")
     keep_open: bool = Field(False, description="Keep browser open after search (blocks until stopped)")
     browser_type: BROWSER_TYPE_CHOICES = Field("chromium", description="Browser engine: chromium, firefox, or webkit")
+
+
+# ── Campaigns ───────────────────────────────────────────────────────
+
+class CampaignCreate(BaseModel):
+    user_id: int = Field(..., description="User ID from authentication table")
+    name: str = Field(..., description="Name of the campaign")
+    target_interest: str = Field(..., description="Target interest / customer description")
+    optional_keywords: Optional[list[str]] = Field(None, description="Additional search keywords")
+    max_profiles: int = Field(50, description="Max profiles to discover")
+
+
+class CampaignResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    target_interest: str
+    optional_keywords: Optional[list[str]] = None
+    max_profiles: int
+    created_at: str
+    updated_at: str
 
 
 # ── Lead Generation Pipeline ────────────────────────────────────────
@@ -232,9 +330,10 @@ class LeadGenRequest(BaseModel):
     target_interest: str = Field(..., description="Target interest / customer description")
     optional_keywords: Optional[list[str]] = Field(None, description="Additional search keywords")
     max_profiles: int = Field(50, ge=1, le=200, description="Max profiles to discover and analyze")
-    headless: bool = Field(False, description="Run browser in headless mode")
+    headless: bool = Field(True, description="Run browser in headless mode")
     browser_type: BROWSER_TYPE_CHOICES = Field("chromium", description="Browser engine")
     model: str = Field("gpt-4.1-mini", description="OpenAI model for both AI brains")
+    campaign_id: Optional[int] = Field(None, description="Campaign ID to associate leads with")
 
 
 class SmartLeadRequest(BaseModel):
@@ -243,9 +342,10 @@ class SmartLeadRequest(BaseModel):
     target_interest: str = Field(..., description="Target interest / customer description")
     optional_keywords: Optional[list[str]] = Field(None, description="Additional search keywords")
     max_profiles: int = Field(50, ge=1, le=200, description="Max profiles to discover and qualify")
-    headless: bool = Field(False, description="Run browser in headless mode")
+    headless: bool = Field(True, description="Run browser in headless mode")
     browser_type: BROWSER_TYPE_CHOICES = Field("chromium", description="Browser engine")
     model: str = Field("gpt-4.1-mini", description="AI model for both brains")
+    campaign_id: Optional[int] = Field(None, description="Campaign ID to associate leads with")
 
 
 class DiscoveryPlanRequest(BaseModel):

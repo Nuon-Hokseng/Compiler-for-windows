@@ -39,16 +39,29 @@ def create_stop_checker(stop_flag):
 
 
 def do_single_scroll(page, log=print, scroll_up_chance=0.30):
-    page.press('body', 'PageDown')
+    try:
+        page.keyboard.press('PageDown')
+    except Exception as e:
+        log(f"⚠️ Scroll failed, retrying with JS fallback: {e}")
+        try:
+            page.evaluate("window.scrollBy(0, window.innerHeight)")
+        except Exception:
+            pass
     pause_time = random.uniform(0.8, 1.5)
     page.wait_for_timeout(int(pause_time * 1000))
     
     # Chance to scroll up for natural behavior
     did_scroll_up = False
     if random.uniform(0, 1) < scroll_up_chance:
-        page.press('body', 'PageUp')
+        try:
+            page.keyboard.press('PageUp')
+        except Exception:
+            pass
         time.sleep(random.uniform(0.5, 1.0))
-        page.press('body', 'PageDown')
+        try:
+            page.keyboard.press('PageDown')
+        except Exception:
+            pass
         time.sleep(random.uniform(0.3, 0.7))
         did_scroll_up = True
     

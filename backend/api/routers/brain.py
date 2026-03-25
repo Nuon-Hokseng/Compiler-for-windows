@@ -2,7 +2,7 @@
 Brain (Analysis) Router
 =======================
 Two AI analysis endpoints:
-  1. General niche analysis via OllamaBrain
+  1. General niche analysis via AIBrain
   2. Target customer identification via TargetIdentificationBrain
 """
 
@@ -17,7 +17,7 @@ from api.shared.models import (
 router = APIRouter(prefix="/brain", tags=["Brain (Analysis)"])
 
 
-# ── Synchronous helpers (Ollama calls are blocking) ──────────────────
+# ── Synchronous helpers (AI calls are blocking) ──────────────────
 
 def _analyze_worker(task_id: str, users: list[dict], target_customer: str, model: str):
     log = make_log_fn(task_id)
@@ -25,7 +25,7 @@ def _analyze_worker(task_id: str, users: list[dict], target_customer: str, model
     log(f"Starting niche analysis for '{target_customer}' ({len(users)} users, model={model})")
 
     try:
-        from agents.ollama_brain import analyze_accounts
+        from agents.ai_brain import analyze_accounts
         results = analyze_accounts(users, target_customer=target_customer, model=model)
         log(f"Analysis complete – {len(results)} relevant accounts returned")
         update_task(
@@ -69,7 +69,7 @@ def _classify_worker(task_id: str, users: list[dict], model: str):
 @router.post("/analyze", response_model=TaskResponse)
 async def analyze_accounts_endpoint(req: AnalyzeAccountsRequest, bg: BackgroundTasks):
     """
-    Send a list of Instagram usernames through the **OllamaBrain** niche filter.
+    Send a list of Instagram usernames through the **AIBrain** niche filter.
 
     The brain classifies each account into a niche (e.g. *car enthusiast*,
     *skincare brand*) and scores relevance 1-10. Results are available via

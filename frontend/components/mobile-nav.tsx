@@ -10,6 +10,7 @@ import {
   Users,
   Crosshair,
   Globe,
+  Folder,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { useI18n } from "@/contexts/I18nContext";
 const linkKeys = [
   { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { href: "/accounts", labelKey: "nav.accounts", icon: Users },
+  { href: "/campaigns", labelKey: "nav.campaigns", icon: Folder },
   { href: "/leads", labelKey: "nav.pipeline", icon: Crosshair },
 ];
 

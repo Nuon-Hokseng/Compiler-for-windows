@@ -9,7 +9,7 @@ from collections import Counter
 # Ensure parent directory is in path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.ollama_brain import analyze_accounts
+from agents.ai_brain import analyze_accounts
 from output.csv_export import export_to_csv
 from config.targets import get_target_config
 from browser.search_engine import perform_search
@@ -225,11 +225,16 @@ def scrape_hashtags_sync(page, target_customer: str,
         log(f"  🏷️ Searching for #{hashtag} via search bar...")
 
         try:
-            # Use the search engine to type the hashtag naturally
-            search_term = f"#{hashtag}"
-            if not perform_search(page, search_term, "hashtag", log):
-                log(f"  ⚠️ Could not search for #{hashtag}, skipping...")
-                continue
+            clean_tag = hashtag.lstrip("#")
+            direct_url = f"https://www.instagram.com/explore/tags/{clean_tag}/"
+            log(f"  🏷️ Navigating to #{clean_tag} via direct URL...")
+            
+            page.goto(direct_url, wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass
+            log(f"  ✅ Loaded #{clean_tag} hashtag page")
 
             # Wait for hashtag page to load
             _human_delay_sync("page_load")
@@ -365,10 +370,10 @@ def run_scraper_pipeline_sync(page, target_customer: str,
     commenters = [u for u in scraped if u.get("source") == "commenter"]
     log(f"📊 Collected: {len(owners)} owners, {len(commenters)} commenters")
 
-    # Step 2 — Ollama analysis
-    log(f"🧠 [Ollama] Analyzing {len(scraped)} accounts...")
+    # Step 2 — AI analysis
+    log(f"🧠 [AI] Analyzing {len(scraped)} accounts...")
     results = analyze_accounts(scraped, target_customer=target_customer, model=model)
-    log(f"🧠 [Ollama] Filtered to {len(results)} relevant accounts")
+    log(f"🧠 [AI] Filtered to {len(results)} relevant accounts")
 
     if results:
         for r in results[:5]:

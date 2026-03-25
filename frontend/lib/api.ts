@@ -126,6 +126,32 @@ export interface CookieSnapshot {
   instagram_username?: string | null;
 }
 
+export type HeadlessSessionStatus =
+  | "initializing"
+  | "awaiting_credentials"
+  | "submitting_credentials"
+  | "waiting_login_result"
+  | "awaiting_2fa"
+  | "submitting_2fa"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface HeadlessSessionSnapshot {
+  session_id: string;
+  user_id: number;
+  status: HeadlessSessionStatus;
+  message: string;
+  current_url?: string | null;
+  requires_2fa: boolean;
+  created_at: number;
+  updated_at: number;
+  cookie_row_id?: number | null;
+  cookie_count?: number;
+  instagram_username?: string | null;
+  error?: string | null;
+}
+
 // ─── Account types ───────────────────────────────────────────────────────────
 
 export interface Account {
@@ -180,6 +206,27 @@ export interface AutomationTask {
   error: string | null;
 }
 
+// ─── Campaigns ───────────────────────────────────────────────────────────────
+
+export interface CampaignCreate {
+  user_id: number;
+  name: string;
+  target_interest: string;
+  optional_keywords?: string[];
+  max_profiles: number;
+}
+
+export interface CampaignResponse {
+  id: number;
+  user_id: number;
+  name: string;
+  target_interest: string;
+  optional_keywords?: string[];
+  max_profiles: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Lead Generation types ───────────────────────────────────────────────────
 
 export interface LeadGenRequest {
@@ -191,6 +238,7 @@ export interface LeadGenRequest {
   browser_type?: string;
   model?: string;
   cookie_id?: number;
+  campaign_id?: number;
 }
 
 export interface DiscoveryPlan {
@@ -235,6 +283,31 @@ export interface LeadGenResult {
   profiles_followed?: number;
   discovery_plan: DiscoveryPlan;
   stats?: Record<string, number>;
+}
+
+export type CampaignRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "stopped";
+
+export interface CampaignRunInfo {
+  campaign_id: number;
+  user_id: number;
+  task_id: string;
+  target_interest: string;
+  status: CampaignRunStatus;
+  message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignRunStatusResponse {
+  campaign_id: number;
+  active: boolean;
+  run: CampaignRunInfo | null;
+  task: AutomationTask | null;
 }
 
 // ─── Saved / Qualified Lead types ────────────────────────────────────────────
@@ -320,6 +393,41 @@ export const api = {
         timeout: timeout ?? 120,
         browser_type: "chromium",
       },
+    ),
+
+  startHeadlessSession: (user_id: number, timeout?: number) =>
+    post<{ session_id: string; status: string; message: string }>(
+      "/session/save/headless/start",
+      {
+        user_id,
+        timeout: timeout ?? 180,
+        browser_type: "chrome",
+      },
+    ),
+
+  getHeadlessSessionStatus: (sessionId: string) =>
+    get<HeadlessSessionSnapshot>(`/session/save/headless/${sessionId}`),
+
+  submitHeadlessCredentials: (
+    sessionId: string,
+    identifier: string,
+    password: string,
+  ) =>
+    post<{ session_id: string; status: string; message: string }>(
+      `/session/save/headless/${sessionId}/credentials`,
+      { identifier, password },
+    ),
+
+  submitHeadless2FA: (sessionId: string, code: string) =>
+    post<{ session_id: string; status: string; message: string }>(
+      `/session/save/headless/${sessionId}/2fa`,
+      { code },
+    ),
+
+  cancelHeadlessSession: (sessionId: string) =>
+    post<{ session_id: string; status: string; message: string }>(
+      `/session/save/headless/${sessionId}/cancel`,
+      {},
     ),
 
   checkSession: (user_id: number) =>
@@ -499,16 +607,29 @@ export const api = {
       },
     ),
 
+  getCampaignRunStatus: (campaignId: number, userId: number) =>
+    get<CampaignRunStatusResponse>(
+      `/leads/campaigns/${campaignId}/run-status?user_id=${userId}`,
+    ),
+
+  stopCampaignRun: (campaignId: number, userId: number) =>
+    post<{ task_id: string; status: string; message: string }>(
+      `/leads/campaigns/${campaignId}/stop?user_id=${userId}`,
+      {},
+    ),
+
   // Saved / Qualified Leads
   getSavedLeads: (
     userId: number,
     niche?: string,
     cookieId?: number,
+    campaignId?: number,
     limit?: number,
   ) => {
     const params = new URLSearchParams({ user_id: String(userId) });
     if (niche) params.set("niche", niche);
     if (cookieId) params.set("cookie_id", String(cookieId));
+    if (campaignId) params.set("campaign_id", String(campaignId));
     if (limit) params.set("limit", String(limit));
     return get<{ status: string; leads: SavedLead[] }>(
       `/leads/saved?${params}`,
@@ -524,4 +645,14 @@ export const api = {
     del<{ status: string; deleted: Record<string, unknown> }>(
       `/leads/saved/${leadId}`,
     ),
+
+  // Campaigns
+  getCampaigns: (user_id: number) =>
+    get<CampaignResponse[]>(`/campaigns?user_id=${user_id}`),
+  createCampaign: (data: CampaignCreate) =>
+    post<CampaignResponse>("/campaigns", data),
+  getCampaignById: (campaign_id: number) =>
+    get<CampaignResponse>(`/campaigns/${campaign_id}`),
+  deleteCampaign: (campaign_id: number) =>
+    del<{ status: string; deleted: boolean }>(`/campaigns/${campaign_id}`),
 };

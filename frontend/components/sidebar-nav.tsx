@@ -8,6 +8,7 @@ import {
   Crosshair,
   Instagram,
   Globe,
+  Folder,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SignedIn, SignedOut, UserButton, SignInButton } from "@clerk/nextjs";
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 const linkKeys = [
   { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { href: "/accounts", labelKey: "nav.accounts", icon: Users },
+  { href: "/campaigns", labelKey: "nav.campaigns", icon: Folder },
   { href: "/leads", labelKey: "nav.pipeline", icon: Crosshair },
 ];
 

@@ -34,7 +34,13 @@ export function TaskLogsDialog({ taskId, open, onOpenChange }: TaskLogsDialogPro
         if (t.status !== "running") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         }
-      } catch { /* ignore */ }
+      } catch (err: unknown) { 
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Task not found") || msg.includes("404")) {
+          setLogsData(null);
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        }
+      }
     };
     poll();
     pollRef.current = setInterval(poll, 2000);

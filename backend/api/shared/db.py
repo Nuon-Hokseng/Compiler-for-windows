@@ -230,6 +230,51 @@ def fetch_cookies_by_id(cookie_id: int) -> dict | None:
     return result.data[0] if result.data else None
 
 
+# ── Campaigns CRUD ──────────────────────────────────────────────────
+
+def insert_campaign(campaign: dict) -> dict:
+    sb = get_supabase()
+    result = (
+        sb.table("campaigns")
+        .insert(campaign)
+        .execute()
+    )
+    if not result.data:
+        raise RuntimeError("Failed to insert campaign")
+    return result.data[0]
+
+def fetch_campaigns(user_id: int) -> list[dict]:
+    sb = get_supabase()
+    result = (
+        sb.table("campaigns")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data or []
+
+def fetch_campaign_by_id(campaign_id: int) -> dict | None:
+    sb = get_supabase()
+    result = (
+        sb.table("campaigns")
+        .select("*")
+        .eq("id", campaign_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+def delete_campaign(campaign_id: int) -> bool:
+    sb = get_supabase()
+    result = (
+        sb.table("campaigns")
+        .delete()
+        .eq("id", campaign_id)
+        .execute()
+    )
+    return bool(result.data)
+
 # ── Qualified Leads CRUD ────────────────────────────────────────────
 
 def insert_qualified_lead(lead: dict) -> dict:
@@ -267,6 +312,7 @@ def fetch_qualified_leads(
     user_id: int,
     niche: str | None = None,
     cookie_id: int | None = None,
+    campaign_id: int | None = None,
     limit: int = 200,
 ) -> list[dict]:
     """
@@ -285,6 +331,8 @@ def fetch_qualified_leads(
         q = q.eq("niche", niche)
     if cookie_id:
         q = q.eq("cookie_id", cookie_id)
+    if campaign_id:
+        q = q.eq("campaign_id", campaign_id)
     result = q.execute()
     return result.data or []
 

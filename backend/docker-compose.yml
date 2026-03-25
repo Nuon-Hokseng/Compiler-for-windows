@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      # Add any specific environment variables you need injected directly here
+      # NOTE: Your run.py also decrypts .env.enc, which will still work!
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    # Replace my-api-domain.com with your actual domain or a free nip.io domain
+    # Example: caddy reverse-proxy --from 1.2.3.4.nip.io --to backend:8000
+    command: caddy reverse-proxy https://13-215-202-99.nip.io --to backend:8000
+    depends_on:
+      - backend

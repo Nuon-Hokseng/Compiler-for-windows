@@ -135,7 +135,7 @@ async def get_target_detail(target_key: str):
 
 def _scrape_worker(task_id: str, target_customer: str, user_id: int,
                    headless: bool, max_commenters: int, model: str, browser_type: str):
-    """Run the full async scraper + Ollama analysis + CSV export."""
+    """Run the full async scraper + AI analysis + CSV export."""
     import asyncio
     log = make_log_fn(task_id)
     update_task(task_id, status=TaskStatus.RUNNING)
@@ -167,10 +167,10 @@ def _scrape_worker(task_id: str, target_customer: str, user_id: int,
                             message="No accounts scraped", result={"accounts": []})
                 return
 
-            # Ollama analysis
-            from agents.ollama_brain import analyze_accounts
+            # AI analysis
+            from agents.ai_brain import analyze_accounts
             results = analyze_accounts(scraped, target_customer=target_customer, model=model)
-            log(f"Ollama filtered to {len(results)} relevant accounts")
+            log(f"AI filtered to {len(results)} relevant accounts")
 
             # CSV export
             from output.csv_export import export_to_csv
@@ -195,7 +195,7 @@ async def run_scraper(req: ScrapeRequest, bg: BackgroundTasks):
     """
     Launch the full Instagram scraper pipeline in the background:
     1. Navigate to hashtag pages and collect post owners + commenters
-    2. Send collected accounts to Ollama for niche analysis
+    2. Send collected accounts to AI for niche analysis
     3. Export results to CSV
 
     Progress & results available via `GET /tasks/{task_id}`.

@@ -192,14 +192,13 @@ def type_search_term(page, search_term, log=print):
         return False
 
 
-def click_search_result(page, search_type="hashtag", log=print):
-    time.sleep(random.uniform(2.0, 3.0))
-
+def click_search_result(page, search_type="hashtag", log=print, max_retries=3):
     if search_type == "hashtag":
         log("Looking for hashtag results...")
         result_selectors = [
             'xpath=//a[contains(@href, "/explore/tags/")]',
             'xpath=//span[contains(text(), "#")]/ancestor::a',
+            'xpath=//div[@role="none"]//a[contains(@href, "/explore/")]',
         ]
     else:
         log("Looking for user results...")
@@ -208,42 +207,72 @@ def click_search_result(page, search_type="hashtag", log=print):
             'xpath=//div[@role="none"]//a',
         ]
 
-    for selector in result_selectors:
-        try:
-            results = page.query_selector_all(selector)
-            if results:
-                visible = [r for r in results[:5] if r.is_visible()]
-                if visible:
-                    target = visible[0]
-                    time.sleep(random.uniform(0.3, 0.6))
-                    target.hover()
-                    time.sleep(random.uniform(0.3, 0.6))
-                    target.click()
-                    log("✅ Clicked on search result!")
-                    return True
-        except:
-            continue
+    for attempt in range(max_retries):
+        wait_time = random.uniform(2.0, 3.0) + (attempt * 1.5)  # longer waits on retries
+        log(f"  Waiting {wait_time:.1f}s for results to load (attempt {attempt + 1}/{max_retries})...")
+        time.sleep(wait_time)
 
-    log("Could not find result to click")
+        for selector in result_selectors:
+            try:
+                results = page.query_selector_all(selector)
+                if results:
+                    visible = [r for r in results[:5] if r.is_visible()]
+                    if visible:
+                        target = visible[0]
+                        time.sleep(random.uniform(0.3, 0.6))
+                        target.hover()
+                        time.sleep(random.uniform(0.3, 0.6))
+                        target.click()
+                        log("✅ Clicked on search result!")
+                        return True
+            except:
+                continue
+
+        log(f"  No visible results found on attempt {attempt + 1}")
+
+    log("❌ Could not find any search result after all retries")
     return False
 
 
+PERFORM_SEARCH_TIMEOUT = 45  # seconds — hard cap for the entire search flow
+
+
 def perform_search(page, search_term, search_type="hashtag", log=print):
-    if not click_search_button(page, log):
+    """Execute the full search flow with an overall timeout so it never hangs."""
+    deadline = time.time() + PERFORM_SEARCH_TIMEOUT
+
+    def _timed_out():
+        return time.time() > deadline
+
+    log(f"🔍 [Search] Navigation directly to '{search_term}' (type={search_type})...")
+
+    # Bypass the UI completely to avoid headless detection / missing DOM issues
+    try:
+        if search_type == "hashtag":
+            clean_term = search_term.lstrip("#")
+            target_url = f"https://www.instagram.com/explore/tags/{clean_term}/"
+        else:
+            clean_term = search_term.lstrip("@")
+            target_url = f"https://www.instagram.com/{clean_term}/"
+
+        log(f"  🔗 Navigating to: {target_url}")
+        page.goto(target_url, wait_until="domcontentloaded")
+        
+        try:
+            page.wait_for_load_state("networkidle", timeout=10_000)
+        except Exception:
+            pass
+
+        if "login" in page.url.lower():
+            log(f"  ⚠️ Redirected to login when visiting {target_url}.")
+            return False
+
+        log("  ✅ Navigation successful")
+        return True
+
+    except Exception as e:
+        log(f"❌ [Search] Failed to navigate: {e}")
         return False
-
-    # Small pause — Chrome may start navigating to /explore/ here
-    time.sleep(random.uniform(1.0, 1.5))
-
-    search_input = find_and_activate_search_input(page, log)
-    if not search_input:
-        log("❌ Could not find/activate search input.")
-        return False
-
-    if not type_search_term(page, search_term, log):
-        return False
-
-    return click_search_result(page, search_type, log)
 
 
 def search_instagram(

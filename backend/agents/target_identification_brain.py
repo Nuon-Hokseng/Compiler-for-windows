@@ -114,7 +114,7 @@ Separate each profile with a line: ---
 class TargetIdentificationBrain:
     """Analyzes Instagram profiles and classifies them as IDEAL TARGET, POSSIBLE TARGET, or NON-TARGET."""
 
-    def __init__(self, model: str = "llama3:8b"):
+    def __init__(self, model: str = "claude-3-haiku-20240307"):
         if model.startswith("gpt-"):
             from langchain_openai import ChatOpenAI
             self.llm = ChatOpenAI(model=model, temperature=0.1)
@@ -122,8 +122,8 @@ class TargetIdentificationBrain:
             from langchain_anthropic import ChatAnthropic
             self.llm = ChatAnthropic(model=model, temperature=0.1)
         else:
-            from langchain_ollama import OllamaLLM
-            self.llm = OllamaLLM(model=model, temperature=0.1)
+            raise ValueError(f"Unsupported local model: {model}")
+            
 
     def _build_profile_block(self, user: dict) -> str:
         """Format a single user's available data for the prompt."""
@@ -272,7 +272,7 @@ Output in the mandatory format for each profile, separated by --- ."""
 
 def classify_target_accounts(
     users: list[dict],
-    model: str = "llama3:8b",
+    model: str = "claude-3-haiku-20240307",
 ) -> list[dict]:
     """
     Entry point: classify profiles using the Target Customer Identification Brain.

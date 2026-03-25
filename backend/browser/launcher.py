@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import platform
+import textwrap
 import shutil
 from typing import Literal
 
@@ -49,8 +50,60 @@ SUPPORTED_BROWSERS: list[BrowserType] = [
     "chrome", "chromium", "msedge", "brave", "opera",
     "firefox", "webkit", "safari",
 ]
-DEFAULT_BROWSER: BrowserType = "chrome"
-DEFAULT_HEADLESS: bool = False          # headful so the user can watch
+DEFAULT_BROWSER: BrowserType = os.environ.get("BROWSER_TYPE", "chromium")  # type: ignore[assignment]
+DEFAULT_HEADLESS: bool = os.environ.get("HEADLESS", "true").lower() in ("true", "1", "yes")
+
+# ── Anti-detection constants ─────────────────────────────────────────
+
+_STEALTH_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+_STEALTH_INIT_SCRIPT = textwrap.dedent(r"""
+    // --- Playwright stealth patches ---
+
+    // 1. Hide navigator.webdriver
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // 2. Fake navigator.plugins (headless has empty list)
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+        ],
+    });
+
+    // 3. Fake navigator.languages (headless sometimes has empty array)
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en', 'ja'],
+    });
+
+    // 4. Add window.chrome object (missing in headless)
+    if (!window.chrome) {
+        window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+    }
+
+    // 5. Override Permissions.query to report 'prompt' for notifications
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => {
+        if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission });
+        }
+        return originalQuery(parameters);
+    };
+
+    // 6. Spoof navigator.platform
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+
+    // 7. Fake window.outerWidth/outerHeight (headless often has 0)
+    if (window.outerWidth === 0) {
+        Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
+        Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight });
+    }
+""")
 
 # engine:   which Playwright engine to use (chromium / firefox / webkit)
 # channel:  Playwright channel name (only for chromium-based browsers)
@@ -146,6 +199,19 @@ def _build_opts(
         existing_args = list(opts.get("args", []))
         if not any("--disable-notifications" in a for a in existing_args):
             existing_args.append("--disable-notifications")
+            
+        if headless:
+            for flag in [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1280,720",
+            ]:
+                if flag not in existing_args:
+                    existing_args.append(flag)
+                    
         opts["args"] = existing_args
 
     # For Brave / Opera: find the executable and set executablePath
@@ -299,6 +365,18 @@ async def dismiss_notification_popup_async(page, timeout: int = 3000):
 _DEFAULT_VIEWPORT = {"width": 1280, "height": 720}
 
 
+def _apply_stealth(context, headless: bool = False):
+    """Inject anti-detection stealth script into a sync context."""
+    if headless:
+        context.add_init_script(_STEALTH_INIT_SCRIPT)
+
+
+async def _apply_stealth_async(context, headless: bool = False):
+    """Inject anti-detection stealth script into an async context."""
+    if headless:
+        await context.add_init_script(_STEALTH_INIT_SCRIPT)
+
+
 def launch_with_cookies(
     playwright,
     cookies: list[dict],
@@ -311,10 +389,17 @@ def launch_with_cookies(
     Launch a **non-persistent** browser, inject *cookies*, navigate to
     Instagram and return ``(browser, context, page)`` (sync).
 
+    When running headless, a realistic user-agent and stealth init
+    script are injected to avoid bot detection by Instagram.
+
     The caller MUST close ``context`` and ``browser`` when done.
     """
     browser = launch_browser(playwright, browser_type=browser_type, headless=headless, **extra)
-    context = browser.new_context(viewport=_DEFAULT_VIEWPORT)
+    ctx_opts: dict = {"viewport": _DEFAULT_VIEWPORT}
+    if headless:
+        ctx_opts["user_agent"] = _STEALTH_USER_AGENT
+    context = browser.new_context(**ctx_opts)
+    _apply_stealth(context, headless)
     context.add_cookies(cookies)
     page = context.new_page()
     page.goto(goto_url, wait_until="domcontentloaded")
@@ -337,9 +422,16 @@ async def launch_with_cookies_async(
     """
     Async version of :func:`launch_with_cookies`.
     Returns ``(browser, context, page)``.
+
+    When running headless, a realistic user-agent and stealth init
+    script are injected to avoid bot detection by Instagram.
     """
     browser = await launch_browser_async(playwright, browser_type=browser_type, headless=headless, **extra)
-    context = await browser.new_context(viewport=_DEFAULT_VIEWPORT)
+    ctx_opts: dict = {"viewport": _DEFAULT_VIEWPORT}
+    if headless:
+        ctx_opts["user_agent"] = _STEALTH_USER_AGENT
+    context = await browser.new_context(**ctx_opts)
+    await _apply_stealth_async(context, headless)
     await context.add_cookies(cookies)
     page = await context.new_page()
     await page.goto(goto_url, wait_until="domcontentloaded")

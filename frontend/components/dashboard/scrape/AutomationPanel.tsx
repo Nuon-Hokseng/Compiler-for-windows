@@ -79,7 +79,16 @@ export function AutomationPanel({
           if (status.status === "completed") toast.success(t("scrape.automation.automationCompleted"));
           else toast.error(t("scrape.automation.automationFailed", { error: status.error ?? "" }));
         }
-      } catch { /* keep polling */ }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Task not found") || msg.includes("404")) {
+          if (taskPollRef.current) clearInterval(taskPollRef.current);
+          taskPollRef.current = null;
+          setPersistedTaskId(null);
+          setActiveTask(null);
+          toast.error("Task lost. Server may have restarted due to memory limits.");
+        }
+      }
     }, 2000);
   }
 

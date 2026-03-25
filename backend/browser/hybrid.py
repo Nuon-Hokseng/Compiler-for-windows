@@ -122,14 +122,26 @@ def scroll_on_page(page, scroll_count, should_stop, log=print, like_chance=0.10)
         if should_stop():
             break
             
-        page.press('body', 'PageDown')
+        try:
+            page.keyboard.press('PageDown')
+        except Exception:
+            try:
+                page.evaluate("window.scrollBy(0, window.innerHeight)")
+            except Exception:
+                pass
         time.sleep(random.uniform(0.8, 1.5))
         
         # Small chance to scroll up 
         if random.uniform(0, 1) < 0.15:
-            page.press('body', 'PageUp')
+            try:
+                page.keyboard.press('PageUp')
+            except Exception:
+                pass
             time.sleep(random.uniform(0.3, 0.6))
-            page.press('body', 'PageDown')
+            try:
+                page.keyboard.press('PageDown')
+            except Exception:
+                pass
             time.sleep(random.uniform(0.3, 0.7))
         
         # Random like based on like_chance
@@ -167,11 +179,25 @@ def perform_search_and_explore(page, search_targets, profile_scroll_count, shoul
     log(f"{'='*40}")
     
     try:
-        if not perform_search(page, target, search_type, log):
-            log("Search failed, returning to feed...")
+        log(f"  Navigating directly to {target}...")
+        if search_type == "hashtag":
+            clean_tgt = target.lstrip("#")
+            url = f"https://www.instagram.com/explore/tags/{clean_tgt}/"
+        else:
+            clean_tgt = target.lstrip("@")
+            url = f"https://www.instagram.com/{clean_tgt}/"
+            
+        page.goto(url, wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=10_000)
+        except Exception:
+            pass
+            
+        if "login" in page.url.lower():
+            log("⚠️ Redirected to login, skipping...")
             go_back_to_feed(page, log)
             return False
-        
+            
         # Wait to load
         time.sleep(random.uniform(2.5, 4.0))
         
@@ -342,9 +368,36 @@ def run_csv_profile_visit(
                 # Perform search for this target
                 search_type = "hashtag" if target_type == "hashtag" else "username"
                 
-                if not perform_search(page, target, search_type, log):
-                    log(f"⚠️ Failed to find: {target}")
+                log(f"🔗 Navigating directly to {target}...")
+                if search_type == "hashtag":
+                    clean_tgt = target.lstrip("#")
+                    url = f"https://www.instagram.com/explore/tags/{clean_tgt}/"
+                else:
+                    clean_tgt = target.lstrip("@")
+                    url = f"https://www.instagram.com/{clean_tgt}/"
+                
+                try:
+                    page.goto(url, wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=10_000)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    log(f"⚠️ Could not load {target}: {e}")
                     failed_visits.append(target)
+                    try:
+                        go_back_to_feed(page, log)
+                    except:
+                        pass
+                    continue
+                    
+                if "login" in page.url.lower():
+                    log(f"⚠️ Redirected to login when visiting {target}, skipping...")
+                    failed_visits.append(target)
+                    try:
+                        go_back_to_feed(page, log)
+                    except:
+                        pass
                     continue
                 
                 # Wait for profile/hashtag page to load
@@ -512,8 +565,17 @@ def run_scraper_scroll_session(cookies: list[dict], session_duration, should_sto
                 log(f"{'='*40}")
 
                 try:
-                    if not perform_search(page, username, "username", log):
-                        log(f"⚠️ Could not find @{username}, skipping...")
+                    url = f"https://www.instagram.com/{username}/"
+                    log(f"🔗 Navigating directly to {url}")
+                    
+                    page.goto(url, wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=10_000)
+                    except Exception:
+                        pass
+                        
+                    if "login" in page.url.lower():
+                        log(f"⚠️ Redirected to login when visiting @{username}, skipping...")
                     else:
                         time.sleep(random.uniform(2.5, 4.0))
                         profiles_visited += 1

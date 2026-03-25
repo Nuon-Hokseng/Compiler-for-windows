@@ -380,11 +380,21 @@ def _scrape_hashtags_from_plan(
             break
 
         clean_tag = hashtag.lstrip("#")
-        log(f"  🏷️ Navigating to #{clean_tag} via search bar...")
+        direct_url = f"https://www.instagram.com/explore/tags/{clean_tag}/"
+        log(f"  🏷️ Navigating to #{clean_tag} via direct URL...")
 
         try:
-            if not perform_search(page, f"#{clean_tag}", "hashtag", log):
-                log(f"  ⚠️ Could not navigate to #{clean_tag}, skipping...")
+            # Always use direct URL for hashtags — the search bar UI
+            # does not render reliably in headless mode (e.g. on Render).
+            try:
+                page.goto(direct_url, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                except Exception:
+                    pass
+                log(f"  ✅ Loaded #{clean_tag} hashtag page")
+            except Exception as e:
+                log(f"  ❌ Failed to navigate to #{clean_tag}: {e}")
                 continue
 
             _human_delay_sync("page_load")
@@ -833,8 +843,24 @@ def run_smart_lead_pipeline(
             log(f"{'=' * 40}")
 
             try:
-                if not perform_search(page, username, "username", log):
-                    log(f"⚠️ Could not find @{username}, skipping...")
+                # Navigate directly to the profile page — search bar UI
+                # does not render reliably in headless mode (e.g. on Render).
+                profile_url = f"https://www.instagram.com/{username}/"
+                log(f"🔗 Navigating directly to {profile_url}")
+                try:
+                    page.goto(profile_url, wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=10_000)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    log(f"⚠️ Could not load @{username}: {e}")
+                    go_back_to_feed(page, log)
+                    continue
+
+                # Check if redirected to login
+                if "login" in page.url.lower():
+                    log(f"⚠️ Redirected to login when visiting @{username}, skipping...")
                     go_back_to_feed(page, log)
                     continue
 

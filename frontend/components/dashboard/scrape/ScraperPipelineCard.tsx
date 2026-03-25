@@ -64,7 +64,15 @@ export function ScraperPipelineCard({
             toast.error(t("scrape.pipeline.scrapeFailed", { error: status.error ?? "" }));
           }
         }
-      } catch { /* keep polling */ }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Task not found") || msg.includes("404")) {
+          if (jobPollRef.current) clearInterval(jobPollRef.current);
+          jobPollRef.current = null;
+          setActiveJob(null);
+          toast.error("Pipeline lost. Server may have restarted due to memory limits.");
+        }
+      }
     }, 3000);
   }
 

@@ -47,7 +47,7 @@ _load_encrypted_env()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import session, brain, scraper, scrolling, search, leads
+from api.routers import session, brain, scraper, scrolling, search, leads, campaigns
 from api.shared.models import (
     get_task, list_all_tasks, stop_task, stop_all_tasks,
     TaskStatus, TaskInfo, TaskResponse,
@@ -63,10 +63,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS – allow all in dev; tighten for production
+# CORS – local frontend origins for credential-safe browser requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,6 +82,7 @@ app.include_router(scraper.router)
 app.include_router(scrolling.router)
 app.include_router(search.router)
 app.include_router(leads.router)
+app.include_router(campaigns.router)
 
 
 # ── Global Task Endpoints ──────────────────────────────────────────

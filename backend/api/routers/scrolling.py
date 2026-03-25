@@ -205,7 +205,7 @@ async def start_scraper_scroll(req: ScraperScrollRequest, bg: BackgroundTasks):
     The most advanced mode: scrolling + scraper pipeline + auto-visit.
 
     While scrolling:
-    1. Random chance to trigger the **scraper pipeline** (hashtag → post owners/commenters → Ollama → CSV)
+    1. Random chance to trigger the **scraper pipeline** (hashtag → post owners/commenters → AI → CSV)
     2. Collected usernames are visited one-by-one between scrolls
     3. Optionally also explores extra search targets
     """

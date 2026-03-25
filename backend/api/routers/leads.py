@@ -17,6 +17,10 @@ from api.shared.models import (
     QualifyProfilesRequest,
     TaskResponse,
     create_task, update_task, make_log_fn, make_stop_fn, is_stopped, TaskStatus,
+    get_task, stop_task,
+    CampaignRunStatus,
+    get_campaign_run, get_active_campaign_run_for_user,
+    register_campaign_run, update_campaign_run,
 )
 from api.shared.db import (
     fetch_latest_user_cookies,
@@ -186,11 +190,14 @@ def _smart_lead_gen_worker(
     model: str,
     user_id: int | None = None,
     cookie_id: int | None = None,
+    campaign_id: int | None = None,
 ):
     """Background worker for the unified smart lead-generation pipeline."""
     log = make_log_fn(task_id)
     stop = make_stop_fn(task_id)
     update_task(task_id, status=TaskStatus.RUNNING)
+    if campaign_id:
+        update_campaign_run(campaign_id, status=CampaignRunStatus.RUNNING, message="Campaign is running")
     log(f"Starting smart pipeline – interest='{target_interest}', max={max_profiles}, model={model}")
 
     def on_plan_ready(plan):
@@ -226,6 +233,12 @@ def _smart_lead_gen_worker(
                 message=f"Stopped – {total_qualified} leads found, {profiles_followed} followed",
                 result=result,
             )
+            if campaign_id:
+                update_campaign_run(
+                    campaign_id,
+                    status=CampaignRunStatus.STOPPED,
+                    message=f"Stopped – {total_qualified} leads found",
+                )
         else:
             log(f"Pipeline complete: {total_qualified} leads from {total_scanned} profiles, {profiles_followed} followed")
             update_task(
@@ -234,6 +247,12 @@ def _smart_lead_gen_worker(
                 message=f"{total_qualified} leads found, {profiles_followed} followed from {total_scanned} profiles",
                 result=result,
             )
+            if campaign_id:
+                update_campaign_run(
+                    campaign_id,
+                    status=CampaignRunStatus.COMPLETED,
+                    message=f"Completed – {total_qualified} leads found",
+                )
         # ── Save qualified leads to database ──
         if leads and user_id and cookie_id:
             try:
@@ -242,6 +261,7 @@ def _smart_lead_gen_worker(
                     rows.append({
                         "user_id": user_id,
                         "cookie_id": cookie_id,
+                        "campaign_id": campaign_id,
                         "niche": target_interest,
                         "username": lead.get("username", ""),
                         "full_name": lead.get("full_name", ""),
@@ -264,6 +284,12 @@ def _smart_lead_gen_worker(
     except Exception as e:
         log(f"Pipeline error: {e}")
         update_task(task_id, status=TaskStatus.FAILED, message=str(e))
+        if campaign_id:
+            update_campaign_run(
+                campaign_id,
+                status=CampaignRunStatus.FAILED,
+                message=f"Failed: {e}",
+            )
 
 
 @router.post("/smart-run", response_model=TaskResponse)
@@ -278,6 +304,28 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
 
     Poll GET /tasks/{task_id} for progress and results.
     """
+    # Enforce one active campaign per user and idempotent restarts for same campaign.
+    if req.campaign_id:
+        existing = get_campaign_run(req.campaign_id)
+        if existing and existing.user_id == req.user_id:
+            existing_task = get_task(existing.task_id)
+            if existing_task and existing_task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                return TaskResponse(
+                    task_id=existing.task_id,
+                    status="accepted",
+                    message=f"Campaign already running. Poll /tasks/{existing.task_id}",
+                )
+
+        active_run = get_active_campaign_run_for_user(req.user_id)
+        if active_run and active_run.campaign_id != req.campaign_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Another campaign is already running (campaign_id={active_run.campaign_id}, "
+                    f"task_id={active_run.task_id}). Stop it before starting a new one."
+                ),
+            )
+
     # ── Resolve cookies: prefer explicit cookie_id, fallback to latest ──
     cookie_id = None
     if req.cookie_id:
@@ -300,6 +348,13 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
     cookies = row["cookies"]
 
     task = create_task(f"Smart lead pipeline \u2013 {req.target_interest}")
+    if req.campaign_id:
+        register_campaign_run(
+            campaign_id=req.campaign_id,
+            user_id=req.user_id,
+            task_id=task.task_id,
+            target_interest=req.target_interest,
+        )
     bg.add_task(
         _smart_lead_gen_worker,
         task.task_id,
@@ -312,6 +367,7 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
         req.model,
         req.user_id,
         cookie_id,
+        req.campaign_id,
     )
 
     return TaskResponse(
@@ -321,6 +377,52 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
     )
 
 
+@router.get("/campaigns/{campaign_id}/run-status")
+async def get_campaign_run_status(campaign_id: int, user_id: int):
+    """Return latest campaign run + task state so UI can recover after refresh."""
+    run = get_campaign_run(campaign_id)
+    if not run or run.user_id != user_id:
+        return {"campaign_id": campaign_id, "active": False, "run": None, "task": None}
+
+    task = get_task(run.task_id)
+    if task:
+        if task.status == TaskStatus.PENDING:
+            update_campaign_run(campaign_id, status=CampaignRunStatus.PENDING, message=task.message or run.message)
+        elif task.status == TaskStatus.RUNNING:
+            update_campaign_run(campaign_id, status=CampaignRunStatus.RUNNING, message=task.message or run.message)
+        elif task.status == TaskStatus.COMPLETED:
+            update_campaign_run(campaign_id, status=CampaignRunStatus.COMPLETED, message=task.message or run.message)
+        elif task.status == TaskStatus.FAILED:
+            update_campaign_run(campaign_id, status=CampaignRunStatus.FAILED, message=task.message or run.message)
+        elif task.status == TaskStatus.STOPPED:
+            update_campaign_run(campaign_id, status=CampaignRunStatus.STOPPED, message=task.message or run.message)
+        run = get_campaign_run(campaign_id)
+
+    active = bool(run and run.status in (CampaignRunStatus.PENDING, CampaignRunStatus.RUNNING))
+    return {
+        "campaign_id": campaign_id,
+        "active": active,
+        "run": run,
+        "task": task,
+    }
+
+
+@router.post("/campaigns/{campaign_id}/stop", response_model=TaskResponse)
+async def stop_campaign_run(campaign_id: int, user_id: int):
+    """Stop an active campaign background run."""
+    run = get_campaign_run(campaign_id)
+    if not run or run.user_id != user_id:
+        raise HTTPException(status_code=404, detail="No campaign run found")
+
+    task = get_task(run.task_id)
+    if not task or task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+        raise HTTPException(status_code=409, detail="Campaign is not currently running")
+
+    stop_task(run.task_id)
+    update_campaign_run(campaign_id, status=CampaignRunStatus.STOPPED, message="Stop signal sent")
+    return TaskResponse(task_id=run.task_id, status="stopping", message="Stop signal sent")
+
+
 # ── Saved Qualified Leads ───────────────────────────────────────────
 
 @router.get("/saved")
@@ -328,10 +430,11 @@ async def get_saved_leads(
     user_id: int,
     niche: str | None = None,
     cookie_id: int | None = None,
+    campaign_id: int | None = None,
     limit: int = 200,
 ):
-    """Return saved qualified leads, optionally filtered by niche or cookie_id."""
-    rows = fetch_qualified_leads(user_id, niche=niche, cookie_id=cookie_id, limit=limit)
+    """Return saved qualified leads, optionally filtered by niche, cookie_id, or campaign_id."""
+    rows = fetch_qualified_leads(user_id, niche=niche, cookie_id=cookie_id, campaign_id=campaign_id, limit=limit)
     return {"status": "ok", "leads": rows}
 
 
