@@ -42,6 +42,7 @@ class TaskInfo(BaseModel):
 class CampaignRunInfo(BaseModel):
     campaign_id: int
     user_id: int
+    cookie_id: int
     task_id: str
     target_interest: str
     status: CampaignRunStatus
@@ -130,11 +131,23 @@ def get_active_campaign_run_for_user(user_id: int) -> Optional[CampaignRunInfo]:
     return None
 
 
-def register_campaign_run(campaign_id: int, user_id: int, task_id: str, target_interest: str) -> CampaignRunInfo:
+def get_active_campaign_run_for_cookie(user_id: int, cookie_id: int) -> Optional[CampaignRunInfo]:
+    for run in _campaign_runs.values():
+        if (
+            run.user_id == user_id
+            and run.cookie_id == cookie_id
+            and run.status in (CampaignRunStatus.PENDING, CampaignRunStatus.RUNNING)
+        ):
+            return run
+    return None
+
+
+def register_campaign_run(campaign_id: int, user_id: int, cookie_id: int, task_id: str, target_interest: str) -> CampaignRunInfo:
     now = _now_iso()
     run = CampaignRunInfo(
         campaign_id=campaign_id,
         user_id=user_id,
+        cookie_id=cookie_id,
         task_id=task_id,
         target_interest=target_interest,
         status=CampaignRunStatus.PENDING,

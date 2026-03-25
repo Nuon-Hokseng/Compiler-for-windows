@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "ダッシュボード",
     "accounts": "アカウント",
+    "campaigns": "キャンペーン",
     "pipeline": "保存済みプレミアムリード",
     "leadGeneration": "リード生成",
     "brand": "IG ツール",
@@ -186,6 +187,62 @@
       "leadRemoved": "リードを削除しました",
       "failedRemove": "リードの削除に失敗しました",
       "failedLoad": "保存済みリードの読み込みに失敗しました"
+    }
+  },
+  "campaigns": {
+    "page": {
+      "subtitle": "ターゲット別のリード生成キャンペーンを管理・実行します。"
+    },
+    "create": {
+      "title": "新しいキャンペーンを作成",
+      "description": "再利用できるパイプライン設定を作成します",
+      "submit": "キャンペーンを作成"
+    },
+    "form": {
+      "name": "キャンペーン名 *",
+      "namePlaceholder": "例: Q1採用キャンペーン",
+      "interest": "ターゲット興味 *",
+      "interestPlaceholder": "例: 東京のソフトウェアエンジニア",
+      "keywords": "オプションキーワード（カンマ区切り）",
+      "keywordsPlaceholder": "react, typescript, ruby",
+      "maxProfiles": "1回あたり最大プロフィール数"
+    },
+    "list": {
+      "loading": "キャンペーンを読み込み中...",
+      "empty": "キャンペーンがありません。上から作成してください。"
+    },
+    "card": {
+      "target": "ターゲット",
+      "maxProfiles": "1回あたり最大プロフィール数",
+      "keywords": "キーワード",
+      "created": "作成日",
+      "open": "キャンペーンを開く"
+    },
+    "delete": {
+      "confirm": "このキャンペーンを削除してもよろしいですか？関連するすべてのリードの紐づけも解除されます。"
+    },
+    "detail": {
+      "loadFailed": "キャンペーンの読み込みに失敗しました",
+      "back": "キャンペーン一覧へ戻る",
+      "runTitle": "キャンペーンを実行",
+      "runDesc": "このキャンペーン用にAIリード生成パイプラインを実行します。発見・審査されたリードは自動で紐づけられます。",
+      "leadsTitle": "キャンペーンリード",
+      "leadsDesc": "このキャンペーンの全実行で収集された適格リードです。"
+    },
+    "table": {
+      "loadFailed": "キャンペーンリードの読み込みに失敗しました",
+      "removed": "リードを削除しました",
+      "removeFailed": "リードの削除に失敗しました",
+      "emptyTitle": "まだリードが見つかっていません。",
+      "emptyDesc": "キャンペーンパイプラインを実行してこの一覧を埋めてください。"
+    },
+    "toasts": {
+      "fillRequired": "必須項目を入力してください",
+      "created": "キャンペーンを作成しました",
+      "createFailed": "キャンペーンの作成に失敗しました",
+      "deleted": "キャンペーンを削除しました",
+      "deleteFailed": "キャンペーンの削除に失敗しました",
+      "loadFailed": "キャンペーンの読み込みに失敗しました"
     }
   },
   "targets": {

@@ -189,6 +189,62 @@
       "failedLoad": "Failed to load saved leads"
     }
   },
+  "campaigns": {
+    "page": {
+      "subtitle": "Manage and run targeted lead generation campaigns."
+    },
+    "create": {
+      "title": "Create New Campaign",
+      "description": "Set up a reusable pipeline configuration",
+      "submit": "Create Campaign"
+    },
+    "form": {
+      "name": "Campaign Name *",
+      "namePlaceholder": "e.g. Q1 Tech Recruitment",
+      "interest": "Target Interest *",
+      "interestPlaceholder": "e.g. Software engineers in Tokyo",
+      "keywords": "Optional Keywords (comma-separated)",
+      "keywordsPlaceholder": "react, typescript, ruby",
+      "maxProfiles": "Max Profiles per Run"
+    },
+    "list": {
+      "loading": "Loading campaigns...",
+      "empty": "No campaigns found. Create one above!"
+    },
+    "card": {
+      "target": "Target",
+      "maxProfiles": "Max profiles/run",
+      "keywords": "Keywords",
+      "created": "Created",
+      "open": "Open Campaign"
+    },
+    "delete": {
+      "confirm": "Are you sure you want to delete this campaign? This will also un-link all leads associated with it."
+    },
+    "detail": {
+      "loadFailed": "Failed to load campaign",
+      "back": "Back to Campaigns",
+      "runTitle": "Run Campaign",
+      "runDesc": "Execute the AI lead generation pipeline for this campaign. All discovered and qualified leads will be automatically linked.",
+      "leadsTitle": "Campaign Leads",
+      "leadsDesc": "Qualified leads collected across all pipeline runs for this campaign."
+    },
+    "table": {
+      "loadFailed": "Failed to load campaign leads",
+      "removed": "Lead removed",
+      "removeFailed": "Failed to remove lead",
+      "emptyTitle": "No leads discovered yet.",
+      "emptyDesc": "Run the campaign pipeline to populate this list."
+    },
+    "toasts": {
+      "fillRequired": "Please fill required fields",
+      "created": "Campaign created",
+      "createFailed": "Failed to create campaign",
+      "deleted": "Campaign deleted",
+      "deleteFailed": "Failed to delete campaign",
+      "loadFailed": "Failed to load campaigns"
+    }
+  },
   "targets": {
     "title": "Targets",
     "subtitle": "Browse target customer profiles and their hashtag/niche configurations.",

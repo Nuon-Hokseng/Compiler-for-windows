@@ -19,7 +19,7 @@ from api.shared.models import (
     create_task, update_task, make_log_fn, make_stop_fn, is_stopped, TaskStatus,
     get_task, stop_task,
     CampaignRunStatus,
-    get_campaign_run, get_active_campaign_run_for_user,
+    get_campaign_run, get_active_campaign_run_for_cookie,
     register_campaign_run, update_campaign_run,
 )
 from api.shared.db import (
@@ -304,7 +304,7 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
 
     Poll GET /tasks/{task_id} for progress and results.
     """
-    # Enforce one active campaign per user and idempotent restarts for same campaign.
+    # Keep same-campaign starts idempotent.
     if req.campaign_id:
         existing = get_campaign_run(req.campaign_id)
         if existing and existing.user_id == req.user_id:
@@ -315,16 +315,6 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
                     status="accepted",
                     message=f"Campaign already running. Poll /tasks/{existing.task_id}",
                 )
-
-        active_run = get_active_campaign_run_for_user(req.user_id)
-        if active_run and active_run.campaign_id != req.campaign_id:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Another campaign is already running (campaign_id={active_run.campaign_id}, "
-                    f"task_id={active_run.task_id}). Stop it before starting a new one."
-                ),
-            )
 
     # ── Resolve cookies: prefer explicit cookie_id, fallback to latest ──
     cookie_id = None
@@ -347,11 +337,25 @@ async def run_smart_lead_generation(req: SmartLeadRequest, bg: BackgroundTasks):
 
     cookies = row["cookies"]
 
+    # Allow many campaigns per user, but only one running campaign per IG account (cookie_id).
+    if req.campaign_id and cookie_id is not None:
+        active_run = get_active_campaign_run_for_cookie(req.user_id, cookie_id)
+        if active_run and active_run.campaign_id != req.campaign_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This Instagram account is already running another campaign "
+                    f"(campaign_id={active_run.campaign_id}, task_id={active_run.task_id}). "
+                    f"Use a different account cookie or stop the running campaign first."
+                ),
+            )
+
     task = create_task(f"Smart lead pipeline \u2013 {req.target_interest}")
     if req.campaign_id:
         register_campaign_run(
             campaign_id=req.campaign_id,
             user_id=req.user_id,
+            cookie_id=cookie_id,
             task_id=task.task_id,
             target_interest=req.target_interest,
         )

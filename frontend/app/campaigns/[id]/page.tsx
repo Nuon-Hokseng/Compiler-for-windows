@@ -3,8 +3,15 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useI18n } from "@/contexts/I18nContext";
 import { api, type CampaignResponse, type LeadGenResult } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, PlayCircle, Users } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +22,8 @@ import { SavedLeadsTable } from "./SavedLeadsTable";
 export default function CampaignDetailPage() {
   const { id } = useParams() as { id: string };
   const { user } = useAuth();
-  
+  const { t } = useI18n();
+
   const [campaign, setCampaign] = useState<CampaignResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +43,8 @@ export default function CampaignDetailPage() {
       }
       setCampaign(data);
     } catch (err: any) {
-      setError(err.message || "Failed to load campaign");
-      toast.error("Failed to load campaign");
+      setError(err.message || t("campaigns.detail.loadFailed"));
+      toast.error(t("campaigns.detail.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -60,7 +68,7 @@ export default function CampaignDetailPage() {
       <div className="p-8 text-center space-y-4">
         <p className="text-destructive">{error || "Campaign not found"}</p>
         <Button asChild variant="outline">
-          <Link href="/campaigns">Back to Campaigns</Link>
+          <Link href="/campaigns">{t("campaigns.detail.back")}</Link>
         </Button>
       </div>
     );
@@ -77,7 +85,10 @@ export default function CampaignDetailPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
           <p className="text-muted-foreground flex items-center gap-2">
-            Target: <span className="font-medium text-foreground">{campaign.target_interest}</span>
+            {t("campaigns.card.target")}:{" "}
+            <span className="font-medium text-foreground">
+              {campaign.target_interest}
+            </span>
           </p>
         </div>
       </div>
@@ -88,15 +99,12 @@ export default function CampaignDetailPage() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <PlayCircle className="h-5 w-5" />
-                Run Campaign
+                {t("campaigns.detail.runTitle")}
               </CardTitle>
-              <CardDescription>
-                Execute the AI lead generation pipeline for this campaign.
-                All discovered and qualified leads will be automatically linked.
-              </CardDescription>
+              <CardDescription>{t("campaigns.detail.runDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <LeadGenForm 
+              <LeadGenForm
                 onResults={handlePipelineResult}
                 campaignId={campaign.id}
                 fixedTargetInterest={campaign.target_interest}
@@ -112,10 +120,10 @@ export default function CampaignDetailPage() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Campaign Leads
+                {t("campaigns.detail.leadsTitle")}
               </CardTitle>
               <CardDescription>
-                Qualified leads collected across all pipeline runs for this campaign.
+                {t("campaigns.detail.leadsDesc")}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex-1">
