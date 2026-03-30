@@ -20,7 +20,7 @@ const actions = [
     descKey: "dashboard.quickActions.addAccountDesc",
   },
   {
-    href: "/leads",
+    href: "/campaigns",
     icon: Crosshair,
     titleKey: "dashboard.quickActions.runPipeline",
     descKey: "dashboard.quickActions.runPipelineDesc",
